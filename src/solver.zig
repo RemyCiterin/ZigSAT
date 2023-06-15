@@ -5,6 +5,10 @@ const Heap = @import("Heap.zig").Heap;
 const IntSet = @import("IntSet.zig").IntSet;
 const IntMap = @import("IntMap.zig").IntMap;
 
+const VSIDS = @import("VSIDS.zig");
+
+const LBDstats = @import("LBDstats.zig");
+
 // representation of literals and possibly undefined boolean
 const lbool = @import("lit.zig").lbool;
 const Lit = @import("lit.zig").Lit;
@@ -13,6 +17,10 @@ const Lit = @import("lit.zig").Lit;
 const Clause = @import("clause.zig").Clause;
 const ClauseManager = @import("clause.zig").ClauseManager;
 const ClauseRef = @import("clause.zig").ClauseRef;
+
+// import theory solver to reason about theory like
+// uninterpreted functions, linear arithmetic...
+const TSolver = @import("theory_solver.zig").TSolver;
 
 /// when a clause watch a variable (the variable is one of the two
 /// first literals of it's expression), we store this clause
@@ -26,10 +34,8 @@ const Watcher = struct { cref: ClauseRef, blocker: Lit };
 /// `Lit.init(var, value)` must be a literal of this clause
 const AssignedVarState = struct { level: u32, value: bool, reason: ?ClauseRef };
 
-const Variable = u31;
-pub fn variableToUsize(x: Variable) usize {
-    return @intCast(usize, x);
-}
+const Variable = @import("lit.zig").Variable;
+pub const variableToUsize = @import("lit.zig").variableToUsize;
 
 /// if a variable is not assigned, then no state is necessary
 const VarState = ?AssignedVarState;
@@ -38,13 +44,6 @@ const VarState = ?AssignedVarState;
 const VarData = struct {
     /// state: assigned or not and why
     state: VarState,
-
-    /// the user may set a polarity for a variable, the
-    /// default assignation of it
-    polarity: bool,
-
-    /// the activity of a variable represent if this literal is present in many conflicts
-    activity: f64,
 
     /// the list of all the watchers of the literal `Lit.init(variable, true)`
     pos_watchers: std.ArrayList(Watcher),
@@ -75,106 +74,6 @@ const AnalyseData = struct {
     fn deinit(self: *Self) void {
         self.result.deinit();
         self.int_set.deinit();
-    }
-};
-
-pub const LBDstats = struct {
-    lt_sum: usize,
-    st_sum: usize,
-
-    lt_cap: usize,
-    st_cap: usize,
-
-    lt_buffer1: std.ArrayList(usize),
-    lt_buffer2: std.ArrayList(usize),
-
-    st_buffer1: std.ArrayList(usize),
-    st_buffer2: std.ArrayList(usize),
-
-    num_conflicts: usize,
-    need_conflicts: usize,
-
-    mean_size: f64,
-
-    const Self = @This();
-
-    pub fn init(allocator: std.mem.Allocator) Self {
-        var self: Self = undefined;
-
-        self.lt_buffer1 = std.ArrayList(usize).init(allocator);
-        self.lt_buffer2 = std.ArrayList(usize).init(allocator);
-        self.st_buffer1 = std.ArrayList(usize).init(allocator);
-        self.st_buffer2 = std.ArrayList(usize).init(allocator);
-        self.lt_sum = 0;
-        self.st_sum = 0;
-
-        self.num_conflicts = 0;
-        self.need_conflicts = 100;
-
-        self.lt_cap = 5000;
-        self.st_cap = 50;
-
-        return self;
-    }
-
-    pub fn deinit(self: *Self) void {
-        self.lt_buffer1.deinit();
-        self.lt_buffer2.deinit();
-        self.st_buffer1.deinit();
-        self.st_buffer2.deinit();
-    }
-
-    pub fn clear(self: *Self) void {
-        //self.st_buffer1.clearRetainingCapacity();
-        //self.st_buffer2.clearRetainingCapacity();
-        self.need_conflicts += 300;
-        self.num_conflicts = 0;
-        self.st_sum = 0;
-    }
-
-    pub fn append(self: *Self, lbd: usize, size: usize) !void {
-        //try std.testing.expect(lbd > 1);
-
-        //while (self.lt_buffer1.items.len + self.lt_buffer2.items.len >= self.lt_cap) {
-        //    if (self.lt_buffer2.items.len == 0)
-        //        while (self.lt_buffer1.items.len > 0)
-        //            try self.lt_buffer2.append(self.lt_buffer1.pop());
-        //    self.lt_sum -= self.lt_buffer2.pop();
-        //}
-
-        //while (self.st_buffer1.items.len + self.st_buffer2.items.len >= self.st_cap) {
-        //    if (self.st_buffer2.items.len == 0)
-        //        while (self.st_buffer1.items.len > 0)
-        //            try self.st_buffer2.append(self.st_buffer1.pop());
-        //    self.st_sum -= self.st_buffer2.pop();
-        //}
-
-        //try self.lt_buffer1.append(lbd);
-        //try self.st_buffer1.append(lbd);
-        //self.st_sum += lbd;
-        //self.lt_sum += lbd;
-        _ = lbd;
-
-        self.num_conflicts += 1;
-
-        self.mean_size += 0.01 * (@intToFloat(f64, size) - self.mean_size);
-    }
-
-    pub fn needRestart(self: Self) bool {
-        //if (self.st_buffer1.items.len + self.st_buffer2.items.len < self.st_cap)
-        //    return false;
-
-        //if (self.lt_buffer1.items.len + self.lt_buffer2.items.len < self.lt_cap)
-        //    return false;
-
-        return self.need_conflicts < self.num_conflicts;
-
-        //const st_sum = @intToFloat(f64, self.st_sum);
-        //const lt_sum = @intToFloat(f64, self.lt_sum);
-        //const st_cap = @intToFloat(f64, self.st_cap);
-        //const lt_cap = @intToFloat(f64, self.lt_cap);
-
-        //return st_sum * 0.7 / st_cap > lt_sum / lt_cap;
     }
 };
 
@@ -247,7 +146,7 @@ pub const Solver = struct {
     analyse_data: AnalyseData,
 
     /// an heap for VSIDS heuristic
-    vsids_heap: Heap(Variable, variableToUsize),
+    vsids: VSIDS,
 
     /// allocator of the solver
     allocator: std.mem.Allocator,
@@ -258,25 +157,11 @@ pub const Solver = struct {
     /// current decision level of the solver
     level: u32,
 
-    /// variable activity decay factor
-    activity_decay_factor: f64,
-
-    /// activity add at each call of incrActivity
-    activity_increment: f64,
-
     /// statistics of the solver (for profiling)
     stats: SolverStats,
 
     const Self = @This();
     const SolverError = std.mem.Allocator.Error || error{TooManyVariables};
-
-    fn mkDecision(self: *Self) ?Lit {
-        if (self.vsids_heap.empty())
-            return null;
-
-        var v = self.vsids_heap.getMin();
-        return Lit.init(v, self.variables.items[v].polarity);
-    }
 
     pub fn progressEstimate(self: *Self) f64 {
         var progress: f64 = 0.0;
@@ -301,27 +186,6 @@ pub const Solver = struct {
         }
 
         return self.lbd_int_set.len();
-    }
-
-    pub fn incrActivity(self: *Self, variable: Variable) !void {
-        self.variables.items[variable].activity -= self.activity_increment;
-        var act = self.variables.items[variable].activity;
-
-        if (self.vsids_heap.inHeap(variable))
-            try self.vsids_heap.insert(variable, act);
-
-        if (act < -1e100) {
-            for (self.variables.items) |*v_data, v| {
-                v_data.activity *= 1e-100;
-                if (self.vsids_heap.inHeap(@intCast(Variable, v)))
-                    try self.vsids_heap.insert(@intCast(Variable, v), v_data.activity);
-            }
-            self.activity_increment *= 1e-100;
-        }
-    }
-
-    fn decayActivity(self: *Self) void {
-        self.activity_increment *= 1.0 / self.activity_decay_factor;
     }
 
     pub fn checkModel(self: *Self) bool {
@@ -480,7 +344,7 @@ pub const Solver = struct {
 
             for (clause.?.expr) |lit| {
                 if (pivot != null and pivot.?.equals(lit)) continue;
-                try self.incrActivity(lit.variable());
+                try self.vsids.incrActivity(lit.variable());
 
                 if (!int_set.inSet(lit.variable())) {
                     try int_set.insert(lit.variable());
@@ -571,7 +435,6 @@ pub const Solver = struct {
             for (cref.expr) |lit| {
                 if (self.value(lit) == .ltrue) {
                     _ = self.clause_manager.learned_clauses.swapRemove(index);
-                    try self.clause_manager.deleted_clauses.append(cref);
                     cref.stats.Learned.is_deleted = true;
                     self.removeClause(cref);
                     continue :main_loop;
@@ -580,6 +443,22 @@ pub const Solver = struct {
 
             index += 1;
         }
+
+        //index = 0;
+        //main_loop: while (index < self.clause_manager.initial_clauses.items.len) {
+        //    var cref = self.clause_manager.initial_clauses.items[index];
+
+        //    for (cref.expr) |lit| {
+        //        if (self.value(lit) == .ltrue) {
+        //            self.removeClause(cref);
+        //            _ = self.clause_manager.initial_clauses.swapRemove(index);
+        //            self.clause_manager.deinitClause(cref);
+        //            continue :main_loop;
+        //        }
+        //    }
+
+        //    index += 1;
+        //}
     }
 
     pub fn addLearnedClause(self: *Self, expr: []Lit) !ClauseRef {
@@ -637,7 +516,7 @@ pub const Solver = struct {
         } else {
             var cref = try self.clause_manager.initClause(false, new_expr.items);
             for (cref.expr) |lit|
-                try self.incrActivity(lit.variable());
+                try self.vsids.incrActivity(lit.variable());
             try self.attachClause(cref);
         }
     }
@@ -667,7 +546,7 @@ pub const Solver = struct {
         }
 
         self.variables.items[lit.variable()].state = st;
-        self.vsids_heap.remove(lit.variable());
+        try self.vsids.setState(lit.variable(), lbool.init(lit.sign()));
     }
 
     fn dequeueAssignation(self: *Self) !Lit {
@@ -685,10 +564,7 @@ pub const Solver = struct {
 
         self.variables.items[lit.variable()].state = null;
 
-        self.variables.items[lit.variable()].polarity = lit.sign();
-
-        var act = self.variables.items[lit.variable()].activity;
-        try self.vsids_heap.insert(lit.variable(), act);
+        try self.vsids.setState(lit.variable(), .lundef);
 
         return lit;
     }
@@ -712,7 +588,13 @@ pub const Solver = struct {
             if (try self.propagate()) |cref| {
                 if (self.level == 0) return false;
 
+                var num_assign = self.assignation_queue.items.len;
+                try self.lbd_stats.addNumAssign(num_assign);
+
                 var new_expr = try self.analyse(cref);
+
+                var lbd = 1 + try self.getLBD(new_expr.items);
+                try self.lbd_stats.append(lbd, new_expr.items.len);
 
                 var level: u32 = 0;
                 for (new_expr.items) |lit| {
@@ -736,24 +618,22 @@ pub const Solver = struct {
                     var new_clause = try self.addLearnedClause(new_expr.items);
                     try self.mkAssignation(new_expr.items[0], new_clause);
                     self.clause_manager.incrActivity(new_clause);
-                    var lbd = 1 + try self.getLBD(new_clause.expr);
-                    try self.lbd_stats.append(lbd, new_clause.expr.len);
                 }
 
                 self.clause_manager.decayActivity();
-                self.decayActivity();
+                self.vsids.decayActivity();
+
+                if (self.lbd_stats.needRestart())
+                    try self.restart();
             } else {
                 var db_len = self.clause_manager.learned_clauses.items.len;
                 if (db_len > 20000 + 500 * self.stats.numGC())
                     try self.garbadgeCollect(0.5);
 
-                //if (self.level == 0)
-                //    try self.simplify();
+                if (self.level == 0)
+                    try self.simplify();
 
-                if (self.lbd_stats.needRestart())
-                    try self.restart();
-
-                var decision = self.mkDecision() orelse return true;
+                var decision = self.vsids.mkDecision() orelse return true;
                 self.level += 1;
 
                 try self.mkAssignation(decision, null);
@@ -801,7 +681,7 @@ pub const Solver = struct {
     }
 
     /// init a new solver, call `deinit()` to free it's memory
-    pub fn init(allocator: std.mem.Allocator) Self {
+    pub fn init(allocator: std.mem.Allocator) !Self {
         var self: Self = undefined;
 
         self.clause_manager = ClauseManager.init(allocator);
@@ -810,14 +690,10 @@ pub const Solver = struct {
         self.variables = std.ArrayList(VarData).init(allocator);
         self.lbd_int_set = IntSet(u32, @import("Heap.zig").u32ToUsize)
             .init(allocator);
-        self.vsids_heap = Heap(Variable, variableToUsize)
-            .init(allocator);
+        self.vsids = VSIDS.init(allocator);
 
         self.analyse_data = AnalyseData.init(allocator);
-        self.lbd_stats = LBDstats.init(allocator);
-
-        self.activity_increment = 1.0;
-        self.activity_decay_factor = 0.8;
+        self.lbd_stats = try LBDstats.init(allocator);
 
         self.allocator = allocator;
         self.is_unsat = false;
@@ -881,8 +757,8 @@ pub const Solver = struct {
         self.assignation_queue.deinit();
         self.analyse_data.deinit();
         self.lbd_int_set.deinit();
-        self.vsids_heap.deinit();
         self.lbd_stats.deinit();
+        self.vsids.deinit();
 
         for (self.variables.items) |*var_data| {
             var_data.pos_watchers.deinit();
@@ -905,15 +781,13 @@ pub const Solver = struct {
 
         var new_var_data: VarData = undefined;
         new_var_data.state = null;
-        new_var_data.polarity = true;
-        new_var_data.activity = 0.0;
         new_var_data.pos_watchers =
             std.ArrayList(Watcher).init(self.allocator);
         new_var_data.neg_watchers =
             std.ArrayList(Watcher).init(self.allocator);
 
-        try self.vsids_heap.insert(new_var, 0.0);
         try self.variables.append(new_var_data);
+        try self.vsids.addVariable();
 
         return new_var;
     }
@@ -1038,7 +912,7 @@ test "random clause manager test" {
 
     while (try iter.next()) |entry| : (index += 1) {
         if (entry.kind == .File) {
-            var solver = Solver.init(allocator);
+            var solver = try Solver.init(allocator);
             defer solver.deinit();
 
             const file_path =

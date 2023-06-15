@@ -187,8 +187,6 @@ pub const ClauseManager = struct {
 
     fn clauseLessThan(context: void, lhs: ClauseRef, rhs: ClauseRef) bool {
         _ = context;
-
-        //return rhs.expr.len > 2 and (lhs.expr.len == 2 or rhs.stats.Learned.activity < lhs.stats.Learned.activity);
         return lhs.stats.Learned.activity > rhs.stats.Learned.activity;
     }
 
@@ -199,19 +197,18 @@ pub const ClauseManager = struct {
 
         const db_size = @intToFloat(f64, self.learned_clauses.items.len);
         var limit = @floatToInt(usize, fraction * db_size);
+        var arena = self.transition_allocator.allocator();
 
         var i: usize = 0;
         while (i < self.learned_clauses.items.len) {
             var cref: ClauseRef = self.learned_clauses.items[i];
 
-            if (i > limit and cref.lock == 0 and cref.expr.len >= 3) {
-                // deinit the clause
+            var delete = i > limit and cref.expr.len >= 3;
+
+            if (cref.lock == 0 and (delete or cref.is_deleted())) {
                 _ = self.learned_clauses.swapRemove(i);
                 cref.stats.Learned.is_deleted = true;
-                //try self.deleted_clauses.append(cref);
             } else {
-                var arena = self.transition_allocator.allocator();
-
                 var expr = try arena.alloc(Lit, cref.expr.len);
                 std.mem.copy(Lit, expr, cref.expr);
                 cref.expr = expr;
@@ -221,17 +218,12 @@ pub const ClauseManager = struct {
                 new_cref.* = cref.*;
 
                 self.learned_clauses.items[i] = new_cref;
-                // keep the clause
                 i += 1;
             }
         }
     }
 
     pub fn applyGC(self: *Self) void {
-        //for (self.deleted_clauses.items) |cref| {
-        //    self.deinitClause(cref);
-        //}
-        //self.deleted_clauses.clearRetainingCapacity();
         self.main_allocator.deinit();
         self.main_allocator = self.transition_allocator;
         self.transition_allocator = std.heap.ArenaAllocator.init(self.allocator);

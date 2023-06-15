@@ -13,6 +13,14 @@ pub const lbool = enum(u8) {
         }
     }
 
+    pub fn sign(self: lbool) bool {
+        switch (self) {
+            .ltrue => return true,
+            .lfalse => return false,
+            else => @panic("undef lbool"),
+        }
+    }
+
     pub fn land(x: lbool, y: lbool) lbool {
         if (x == .lfalse or y == .lfalse) {
             return .lfalse;
@@ -59,6 +67,12 @@ test "test lbool" {
 const LitError = error{InvalidIntegerRepresentation};
 
 pub const LitTag = enum(u2) { pos, neg };
+
+pub const Variable = u31;
+
+pub fn variableToUsize(v: Variable) usize {
+    return @intCast(usize, v);
+}
 
 pub const Lit = union(LitTag) {
     pos: u31,

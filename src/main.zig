@@ -3,8 +3,7 @@ const Solver = @import("solver.zig").Solver;
 const Lit = @import("lit.zig").Lit;
 
 pub fn main() !void {
-    //var rnd = std.rand.DefaultPrng.init(0);
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = false }){};
     const allocator = gpa.allocator();
     defer {
         _ = gpa.deinit();
@@ -13,15 +12,22 @@ pub fn main() !void {
     var expr = std.ArrayList(Lit).init(allocator);
     defer expr.deinit();
 
-    var solver = Solver.init(allocator);
+    var solver = try Solver.init(allocator);
     defer solver.deinit();
 
-    const file_path =
-        try std.fmt.allocPrint(allocator, "test.cnf", .{});
-    std.debug.print("{s}\n", .{file_path});
-    defer allocator.free(file_path);
+    //const file_path: []const u8 = std.os.argv[1];
+    var file_path = std.ArrayList(u8).init(allocator);
 
-    const file = try std.fs.cwd().openFile(file_path, .{});
+    var i: usize = 0;
+    while (std.os.argv[1][i] != 0) : (i += 1)
+        try file_path.append(std.os.argv[1][i]);
+
+    //const file_path =
+    //    try std.fmt.allocPrint(allocator, "test.cnf", .{});
+    std.debug.print("{s}\n", .{file_path.items});
+    defer file_path.deinit();
+
+    const file = try std.fs.cwd().openFile(file_path.items, .{});
     defer file.close();
 
     const file_size = try file.getEndPos();
