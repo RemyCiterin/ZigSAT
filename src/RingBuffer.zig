@@ -15,7 +15,7 @@ pub fn RingBuffer(comptime T: type) type {
         pub fn init(cap: usize, allocator: std.mem.Allocator) !Self {
             var data = try allocator.alloc(T, cap);
 
-            return Self{ .data = data, .allocator = allocator };
+            return Self{ .data = data, .allocator = allocator, .begin = 0, .end = 0 };
         }
 
         pub fn deinit(self: *Self) void {
@@ -28,15 +28,9 @@ pub fn RingBuffer(comptime T: type) type {
         }
 
         pub fn next(self: Self, index: usize) usize {
-            if (index == self.data.len - 1)
+            if (1 + index == self.data.len)
                 return 0;
             return index + 1;
-        }
-
-        pub fn get(self: *Self, index: usize) *T {
-            if (index + self.begin >= self.data.len)
-                return &self.data[index + self.begin];
-            return &self.data[index + self.begin - self.data.len];
         }
 
         pub fn full(self: Self) bool {
@@ -45,12 +39,6 @@ pub fn RingBuffer(comptime T: type) type {
 
         pub fn empty(self: Self) bool {
             return self.begin == self.end;
-        }
-
-        pub fn len(self: Self) usize {
-            if (self.begin > self.end)
-                return (self.end + self.data.len) - self.begin;
-            return self.end - self.begin;
         }
 
         pub fn append(self: *Self, t: T) Err!void {

@@ -8,7 +8,10 @@ const lbool = @import("lit.zig").lbool;
 /// statistics of a learned clause
 pub const LearnedClauseStats = struct {
     /// activity of a clause, increase at each conflict
-    activity: f64,
+    activity: f64 = 0.0,
+
+    /// literal block distance of the clause
+    lbd: usize = 0,
 
     /// for detach it's watched literals if the clause is deleted at GC
     is_deleted: bool = false,
@@ -42,6 +45,13 @@ pub const Clause = struct {
         switch (self.stats) {
             .Learned => |lcs| return lcs.cref,
             else => return null,
+        }
+    }
+
+    pub fn setLBD(self: *@This(), lbd: usize) void {
+        switch (self.stats) {
+            .Learned => |*lcs| lcs.lbd = lbd,
+            else => {},
         }
     }
 };
@@ -83,7 +93,7 @@ pub const ClauseManager = struct {
         //self.deleted_clauses = std.ArrayList(ClauseRef).init(allocator);
         self.transition_allocator = std.heap.ArenaAllocator.init(allocator);
         self.main_allocator = std.heap.ArenaAllocator.init(allocator);
-        self.activity_decay_factor = 0.99;
+        self.activity_decay_factor = 0.999;
         self.activity_increment = 1.0;
         self.allocator = allocator;
         return self;
@@ -115,7 +125,7 @@ pub const ClauseManager = struct {
 
     /// this function clone the expression
     /// the caller have to dealloc it itself
-    pub fn initClause(self: *Self, is_learned: bool, expr: []Lit) !ClauseRef {
+    pub fn initClause(self: *Self, is_learned: bool, expr: []const Lit) !ClauseRef {
         var new_expr: []Lit = undefined;
         var clause: ClauseRef = undefined;
 
@@ -125,7 +135,7 @@ pub const ClauseManager = struct {
 
             try self.learned_clauses.append(clause);
 
-            var st = LearnedClauseStats{ .activity = 0.0, .is_deleted = false, .cref = clause };
+            var st = LearnedClauseStats{ .cref = clause };
             clause.stats = ClauseStats{ .Learned = st };
         } else {
             new_expr = try self.allocator.alloc(Lit, expr.len);
@@ -187,6 +197,8 @@ pub const ClauseManager = struct {
 
     fn clauseLessThan(context: void, lhs: ClauseRef, rhs: ClauseRef) bool {
         _ = context;
+        if (lhs.stats.Learned.lbd != rhs.stats.Learned.lbd)
+            return lhs.stats.Learned.lbd < rhs.stats.Learned.lbd;
         return lhs.stats.Learned.activity > rhs.stats.Learned.activity;
     }
 
@@ -203,7 +215,7 @@ pub const ClauseManager = struct {
         while (i < self.learned_clauses.items.len) {
             var cref: ClauseRef = self.learned_clauses.items[i];
 
-            var delete = i > limit and cref.expr.len >= 3;
+            var delete = i > limit and cref.expr.len >= 3 and cref.stats.Learned.lbd >= 3;
 
             if (cref.lock == 0 and (delete or cref.is_deleted())) {
                 _ = self.learned_clauses.swapRemove(i);

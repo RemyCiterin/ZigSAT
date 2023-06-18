@@ -3,11 +3,12 @@ const Solver = @import("solver.zig").Solver;
 const Lit = @import("lit.zig").Lit;
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = false }){};
-    const allocator = gpa.allocator();
-    defer {
-        _ = gpa.deinit();
-    }
+    //var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = false }){};
+    //const allocator = gpa.allocator();
+    //defer {
+    //    _ = gpa.deinit();
+    //}
+    var allocator = std.heap.c_allocator;
 
     var expr = std.ArrayList(Lit).init(allocator);
     defer expr.deinit();
@@ -15,7 +16,6 @@ pub fn main() !void {
     var solver = try Solver.init(allocator);
     defer solver.deinit();
 
-    //const file_path: []const u8 = std.os.argv[1];
     var file_path = std.ArrayList(u8).init(allocator);
 
     var i: usize = 0;
@@ -41,7 +41,9 @@ pub fn main() !void {
 
     try solver.parse(buffer);
 
-    var b = try solver.cdcl();
+    const assumptions: [0]Lit = undefined;
+    var b = try solver.cdcl(assumptions[0..]);
+    solver.stats.print(solver.progressEstimate());
     if (b) try std.testing.expect(solver.checkModel());
     std.debug.print("{}\n", .{b});
 }

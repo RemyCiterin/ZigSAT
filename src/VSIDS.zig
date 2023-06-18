@@ -23,7 +23,7 @@ pub fn init(allocator: std.mem.Allocator) Self {
     self.polarity = std.ArrayList(bool).init(allocator);
     self.heap = Heap(Variable, variableToUsize).init(allocator);
     self.act_increment = 1.0;
-    self.act_decay = 0.8;
+    self.act_decay = 0.95;
     return self;
 }
 
