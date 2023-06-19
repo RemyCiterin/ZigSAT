@@ -73,7 +73,7 @@ pub const SolverStats = struct {
     }
 
     pub fn print(self: Self, progress: f64) void {
-        std.debug.print("{} {} {} {}\n", .{ self.restart, self.conflict, self.prop, progress });
+        std.debug.print("{}  {}  {}  {}\n", .{ self.restart, self.conflict, self.prop, progress });
     }
 
     pub fn addRestart(self: *Self) void {
@@ -484,6 +484,8 @@ pub const Solver = struct {
     }
 
     pub fn cdcl(self: *Self, assumptions: []const Lit) !bool {
+        var restart_conflicts: usize = 0;
+
         try self.simplify();
         if (self.is_unsat) return false;
         while (true) {
@@ -491,6 +493,7 @@ pub const Solver = struct {
                 if (self.level == 0) return false;
 
                 self.stats.addConflict();
+                restart_conflicts += 1;
 
                 var num_assign = self.assignation_queue.items.len;
                 try self.lbd_stats.addNumAssign(num_assign);
@@ -530,9 +533,10 @@ pub const Solver = struct {
                 self.clause_manager.decayActivity();
                 self.vsids.decayActivity();
             } else {
-                var db_len = self.clause_manager.learned_clauses.items.len;
-                if (db_len > 2000 + 300 * self.stats.numGC())
+                if (restart_conflicts > 2000 + 300 * self.stats.numGC()) {
                     try self.garbadgeCollect(0.5);
+                    restart_conflicts = 0;
+                }
 
                 var decision: ?Lit = null;
 
@@ -622,7 +626,8 @@ pub const Solver = struct {
         self.stats.addGC();
 
         try self.clause_manager.garbadgeCollect(factor);
-        std.debug.print("{} ", .{self.lbd_stats.mean_size});
+        std.debug.print("{}  ", .{@floatToInt(usize, self.lbd_stats.mean_size)});
+        std.debug.print("{}  ", .{self.clause_manager.learned_clauses.items.len});
         self.stats.print(self.progressEstimate());
 
         for (self.variables.items) |*var_data| {

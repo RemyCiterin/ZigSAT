@@ -199,6 +199,10 @@ pub const ClauseManager = struct {
         _ = context;
         if (lhs.stats.Learned.lbd != rhs.stats.Learned.lbd)
             return lhs.stats.Learned.lbd < rhs.stats.Learned.lbd;
+
+        if (lhs.expr.len != rhs.expr.len)
+            return lhs.expr.len < rhs.expr.len;
+
         return lhs.stats.Learned.activity > rhs.stats.Learned.activity;
     }
 

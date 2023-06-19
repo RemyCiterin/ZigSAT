@@ -66,7 +66,7 @@ test "test lbool" {
 
 const LitError = error{InvalidIntegerRepresentation};
 
-pub const LitTag = enum(u2) { pos, neg };
+pub const LitTag = enum(u1) { pos, neg };
 
 pub const Variable = u31;
 

@@ -10,6 +10,8 @@ mkShell {
     python311
     minisat
     glucose
+    cadical
+    kissat
   ];
 
   shellHook = ''

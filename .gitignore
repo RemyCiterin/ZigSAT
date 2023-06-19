@@ -1,2 +1,4 @@
 zig-cache
 zig-out
+minisat
+glucose_static

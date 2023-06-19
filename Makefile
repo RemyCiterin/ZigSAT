@@ -12,6 +12,9 @@ minisat0:
 minisat2:
 	./minisat test.cnf -phase-saving=0 -ccmin-mode=2 -no-luby
 
+glucose:
+	./glucose_static test.cnf -no-pre -ccmin-mode=2
+
 build:
 	zig build -Drelease-fast=true
 

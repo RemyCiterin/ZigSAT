@@ -508,12 +508,14 @@ def rand(N):
             return n
 
 def facto(N, bits):
+    n = 1+int(N ** 0.5)
+    n = UBV.fromInt(n, bits)
     N = UBV.fromInt(N, bits)
 
     x = UBV.var(bits)
     y = UBV.var(bits)
 
-    return (x * y == N) & (x < N) & (y < N)
+    return (x * y == N) & (y < N) & (x < N)
 
 
 import subprocess
@@ -543,15 +545,15 @@ def benchmark(prog):
         print(time.time()-t)
 
     for _ in range(30):
-        grid = gen_grid(5, 300)
-        constraint = add_sudoku(grid)
+        #grid = gen_grid(5, 300)
+        #constraint = add_sudoku(grid)
 
         #grid = gen_grid(3, 25)
         #constraint = Sudoku(grid).constraint
 
-        #N = rand(2 ** 20)
-        #print(N)
-        #constraint = facto(N, 42)
+        N = rand(2 ** 20)
+        print(N)
+        constraint = facto(N, 42)
 
         #grid.print()
         f = open("./test.cnf", "w")
@@ -590,9 +592,11 @@ def benchmark(prog):
 plt.plot(np.sort(benchmark(
     ['../zig-out/bin/ZigSAT', 'test.cnf'])), label="ZigSAT")
 plt.plot(np.sort(benchmark(
-    ['../minisat', 'test.cnf', '-ccmin-mode=1', '-phase-saving=2'])), label="minisat")
+    ['../minisat', 'test.cnf', '-ccmin-mode=1', '-phase-saving=2', '-no-luby'])), label="minisat")
 plt.plot(np.sort(benchmark(
-    ['glucose', 'test.cnf', '-no-pre', '-ccmin-mode=1', '-phase-saving=2'])), label="glucose")
+    ['../glucose_static', 'test.cnf', '-ccmin-mode=1', '-phase-saving=2'])), label="glucose2")
+plt.plot(np.sort(benchmark(
+    ['glucose', 'test.cnf', '-no-pre', '-ccmin-mode=1', '-phase-saving=2'])), label="glucose4")
 plt.yscale("log")
 plt.legend()
 plt.show()
