@@ -2,12 +2,12 @@ with (import <nixpkgs> {});
 mkShell {
   buildInputs = [
     linuxKernel.packages.linux_6_3.perf
-    python311Packages.matplotlib
-    python311Packages.tkinter
-    python311Packages.numpy
+    python310Packages.matplotlib
+    python310Packages.tkinter
+    python310Packages.numpy
     tcl
     tk
-    python311
+    python310
     minisat
     glucose
     cadical

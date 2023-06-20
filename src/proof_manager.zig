@@ -35,14 +35,14 @@ pub const Proof = union(enum) {
         }
     }
 
-    pub fn updateAddr(self: Self, addr: ProofRef) void {
+    fn updateAddr(self: Self, addr: ProofRef) void {
         switch (self) {
             .resolution => |*res| res.pref = addr,
             else => @panic("cannot update the reference to an axiom"),
         }
     }
 
-    pub fn setKeepTrue(self: *Self) void {
+    fn setKeepTrue(self: *Self) void {
         switch (self) {
             .resolution => |*res| {
                 if (res.keep) return;
@@ -99,6 +99,27 @@ pub const ProofManager = struct {
         self.local_base = base;
     }
 
+    pub fn initWithLocalState(self: *Self) !ProofRef {
+        var allocator = self.main_arena.allocator();
+
+        var steps = try allocator.alloc(Resolution.ResStep, self.local_steps.items.len);
+        std.mem.copy(Resolution.ResStep, steps, self.local_steps.items);
+
+        var proof = try allocator.create(Proof);
+
+        proof.* = .{
+            .resolution = .{
+                .steps = steps,
+                .base = self.local_base.?,
+                .pref = proof,
+            },
+        };
+
+        try self.resolutions.append(proof);
+
+        return proof;
+    }
+
     pub fn initAxiom(self: *Self, expr: []const Lit) !ProofRef {
         var proof = try self.allocator.create(Proof);
 
@@ -109,6 +130,17 @@ pub const ProofManager = struct {
         try self.axioms.append(proof);
 
         return proof;
+    }
+
+    pub fn keep(self: *Self, proof: ProofRef) void {
+        proof.setKepTrue();
+        _ = self;
+    }
+
+    pub fn newAddr(self: *Self, proof: ProofRef) ?ProofRef {
+        _ = self;
+
+        return proof.newAddr();
     }
 
     pub fn init(allocator: std.mem.Allocator) Self {
@@ -132,8 +164,10 @@ pub const ProofManager = struct {
         self.main_arena.deinit();
         self.transition_arena.deinit();
 
-        for (self.axioms) |axiom|
+        for (self.axioms.items) |axiom| {
+            self.allocator.free(axiom.axiom.expr);
             self.allocator.destroy(axiom);
+        }
 
         self.axioms.deinit();
         self.resolutions.deinit();
