@@ -2,8 +2,6 @@ const std = @import("std");
 const IntSet = @import("IntSet.zig").IntSet;
 const lbool = @import("lit.zig").lbool;
 const Lit = @import("lit.zig").Lit;
-const Clause = @import("clause.zig").Clause;
-const ClauseRef = @import("clause.zig").ClauseRef;
 
 const Variable = @import("lit.zig").Variable;
 pub const variableToUsize = @import("lit.zig").variableToUsize;
@@ -33,8 +31,10 @@ pub fn deinit(self: *Self) void {
     self.int_set.deinit();
 }
 
-pub fn analyze(self: *Self, context: anytype, cref: ClauseRef) ![]const Lit {
+pub fn analyze(self: *Self, comptime ClauseRef: type, context: anytype, cref: ClauseRef) ![]const Lit {
     self.clear();
+
+    context.proof_manager.setBase(cref.proof);
 
     for (cref.expr) |lit|
         try std.testing.expect(context.value(lit) == .lfalse);
@@ -61,6 +61,8 @@ pub fn analyze(self: *Self, context: anytype, cref: ClauseRef) ![]const Lit {
             if (pivot != null and pivot.?.equals(lit)) continue;
 
             if (!self.int_set.inSet(lit.variable()) and context.levelOf(lit.variable()) > 0) {
+                try context.proof_manager.pushStep(lit, clause.?.proof);
+
                 try context.vsids.incrActivity(lit.variable());
                 try self.int_set.insert(lit.variable());
 
@@ -82,24 +84,24 @@ pub fn analyze(self: *Self, context: anytype, cref: ClauseRef) ![]const Lit {
         if (IP_counter == 0) break;
     }
 
-    index = 1;
-    minimize_loop: while (index < self.result.items.len) {
-        var v = self.result.items[index].variable();
+    //index = 1;
+    //minimize_loop: while (index < self.result.items.len) {
+    //    var v = self.result.items[index].variable();
 
-        var reason = context.reasonOf(v) orelse {
-            index += 1;
-            continue;
-        };
+    //    var reason = context.reasonOf(v) orelse {
+    //        index += 1;
+    //        continue;
+    //    };
 
-        for (reason.expr) |l| {
-            if (!self.int_set.inSet(l.variable())) {
-                index += 1;
-                continue :minimize_loop;
-            }
-        }
+    //    for (reason.expr) |l| {
+    //        if (!self.int_set.inSet(l.variable())) {
+    //            index += 1;
+    //            continue :minimize_loop;
+    //        }
+    //    }
 
-        _ = self.result.swapRemove(index);
-    }
+    //    _ = self.result.swapRemove(index);
+    //}
 
     return self.result.items;
 }

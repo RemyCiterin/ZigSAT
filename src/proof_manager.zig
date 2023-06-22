@@ -83,18 +83,18 @@ pub const ProofManager = struct {
     local_steps: std.ArrayList(Resolution.ResStep),
 
     const Self = @This();
-    pub const ProofType = Proof;
+    pub const ProofType = ProofRef;
 
     pub fn clear(self: *Self) void {
         self.local_base = null;
-        self.local_steps.clearRetainCapacity();
+        self.local_steps.clearRetainingCapacity();
     }
 
     pub fn pushStep(self: *Self, lit: Lit, proof: ProofRef) !void {
         try self.local_steps.append(.{ .proof = proof, .lit = lit });
     }
 
-    pub fn updateBase(self: *Self, base: ProofRef) void {
+    pub fn setBase(self: *Self, base: ProofRef) void {
         self.clear();
         self.local_base = base;
     }
@@ -213,5 +213,64 @@ pub const ProofManager = struct {
         self.main_arena.deinit();
         self.main_arena = self.transition_arena;
         self.main_arena = std.heap.ArenaAllocator.init(self.allocator);
+    }
+};
+
+pub const EmptyProofManager = struct {
+    pub const ProofType = void;
+
+    const Self = @This();
+
+    pub fn clear(self: *Self) void {
+        _ = self;
+    }
+
+    pub fn pushStep(self: *Self, lit: Lit, proof: ProofType) !void {
+        _ = proof;
+        _ = self;
+        _ = lit;
+    }
+
+    pub fn setBase(self: *Self, base: ProofType) void {
+        _ = base;
+        _ = self;
+    }
+
+    pub fn initWithLocalState(self: *Self) !ProofType {
+        _ = self;
+    }
+
+    pub fn initAxiom(self: *Self, expr: []const Lit) !ProofType {
+        _ = self;
+        _ = expr;
+        return {};
+    }
+
+    pub fn keep(self: *Self, proof: ProofRef) void {
+        proof.setKepTrue();
+        _ = self;
+    }
+
+    pub fn newAddr(self: *Self, proof: ProofType) ?ProofType {
+        _ = proof;
+        _ = self;
+        return null;
+    }
+
+    pub fn init(allocator: std.mem.Allocator) Self {
+        _ = allocator;
+        return .{};
+    }
+
+    pub fn deinit(self: *Self) void {
+        _ = self;
+    }
+
+    pub fn garbadgeCollect(self: *Self) !void {
+        _ = self;
+    }
+
+    pub fn applyGC(self: *Self) void {
+        _ = self;
     }
 };

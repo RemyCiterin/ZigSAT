@@ -14,9 +14,8 @@ const lbool = @import("lit.zig").lbool;
 const Lit = @import("lit.zig").Lit;
 
 // import clause and clause manager/garbadge collector
-const Clause = @import("clause.zig").Clause;
 const ClauseManager = @import("clause.zig").ClauseManager;
-const ClauseRef = @import("clause.zig").ClauseRef;
+const Clause = @import("clause.zig").Clause;
 
 // import theory solver to reason about theory like
 // uninterpreted functions, linear arithmetic...
@@ -26,13 +25,22 @@ const TSolver = @import("theory_solver.zig").TSolver;
 /// first literals of it's expression), we store this clause
 /// (to detect efficiently unit propagation) and
 /// the other watcher literal (for optimization)
-const Watcher = struct { cref: ClauseRef, blocker: Lit };
+fn Watcher(comptime Proof: type) type {
+    return struct { cref: *Clause(Proof), blocker: Lit };
+}
 
 /// the state of an assigned literal is the decision level of the assignation,
 /// the value of the assignation, and the clause at the origin of the assignation,
 /// all the literals of this clause must be assigned to false and
 /// `Lit.init(var, value)` must be a literal of this clause
-const AssignedVarState = struct { level: u32, value: bool, reason: ?ClauseRef };
+fn AssignedVarState(comptime Proof: type) type {
+    return struct {
+        level: u32,
+        value: bool,
+        reason: ?*Clause(Proof),
+        proof: ?Proof,
+    };
+}
 
 const Analyzer = @import("analyzer.zig");
 
@@ -40,19 +48,23 @@ const Variable = @import("lit.zig").Variable;
 pub const variableToUsize = @import("lit.zig").variableToUsize;
 
 /// if a variable is not assigned, then no state is necessary
-const VarState = ?AssignedVarState;
+fn VarState(comptime Proof: type) type {
+    return ?AssignedVarState(Proof);
+}
 
 /// all the data of a variable store by the solver
-const VarData = struct {
-    /// state: assigned or not and why
-    state: VarState,
+fn VarData(comptime Proof: type) type {
+    return struct {
+        /// state: assigned or not and why
+        state: VarState(Proof),
 
-    /// the list of all the watchers of the literal `Lit.init(variable, true)`
-    pos_watchers: std.ArrayList(Watcher),
+        /// the list of all the watchers of the literal `Lit.init(variable, true)`
+        pos_watchers: std.ArrayList(Watcher(Proof)),
 
-    /// the list of all the watchers of the literal `Lit.init(variable, false)`
-    neg_watchers: std.ArrayList(Watcher),
-};
+        /// the list of all the watchers of the literal `Lit.init(variable, false)`
+        neg_watchers: std.ArrayList(Watcher(Proof)),
+    };
+}
 
 pub const SolverStats = struct {
     restart: usize,
@@ -103,6 +115,9 @@ pub const SolverStats = struct {
 
 pub fn Solver(comptime ProofManager: type) type {
     return struct {
+        pub const Proof = ProofManager.ProofType;
+        pub const ClauseRef = ClauseManager(Proof).ClauseRef;
+
         /// set of all the assignation of the solver, usefull for backtracking,
         /// if a literal `lit` is in the assignation queue, and `self.reasonOf(lit.variable()) != null`
         /// then all the negations of the literals in `self.reasonOf(lit.variable()).expr` are
@@ -114,13 +129,13 @@ pub fn Solver(comptime ProofManager: type) type {
         propagation_queue: std.ArrayList(Lit),
 
         /// a ClauseManager for clause allocation and garbadge collection
-        clause_manager: ClauseManager,
+        clause_manager: ClauseManager(Proof),
 
         /// a manager for proof, perform it's garbadge collection
         proof_manager: ProofManager,
 
         /// set of variables and variables data
-        variables: std.ArrayList(VarData),
+        variables: std.ArrayList(VarData(Proof)),
 
         /// use and compute lbd
         lbd_stats: LBDstats,
@@ -259,7 +274,7 @@ pub fn Solver(comptime ProofManager: type) type {
                     if (self.value(cref.expr[k]) != .lfalse) {
                         std.mem.swap(Lit, &cref.expr[k], &cref.expr[1]);
                         try self.getLitWatchers(cref.expr[1])
-                            .append(Watcher{ .blocker = blocker, .cref = cref });
+                            .append(Watcher(Proof){ .blocker = blocker, .cref = cref });
                         _ = watchers.swapRemove(i);
 
                         continue :watchers_loop;
@@ -281,11 +296,28 @@ pub fn Solver(comptime ProofManager: type) type {
                 //        try std.testing.expect(self.value(l) == .lfalse);
                 //}
 
-                try self.mkAssignation(cref.expr[0], cref);
+                var proof: ?Proof = null;
+
+                if (self.level == 0) {
+                    self.proof_manager.setBase(cref.proof);
+
+                    k = 1;
+                    while (k < cref.expr.len) : (k += 1) {
+                        try self.proof_manager.pushStep(cref.expr[k], self.proofOf(cref.expr[k].variable()));
+                    }
+
+                    proof = try self.proof_manager.initWithLocalState();
+                }
+
+                try self.mkAssignation(cref.expr[0], cref, proof);
                 i += 1;
             }
 
             return null;
+        }
+
+        pub fn proofOf(self: *Self, variable: Variable) Proof {
+            return self.variables.items[variable].state.?.proof.?;
         }
 
         pub fn levelOf(self: *Self, variable: Variable) u32 {
@@ -309,7 +341,7 @@ pub fn Solver(comptime ProofManager: type) type {
         }
 
         pub fn value(self: *Self, lit: Lit) lbool {
-            var st: VarState = self.variables.items[lit.variable()].state;
+            var st: VarState(Proof) = self.variables.items[lit.variable()].state;
 
             if (st == null) return .lundef;
 
@@ -361,10 +393,10 @@ pub fn Solver(comptime ProofManager: type) type {
             }
         }
 
-        pub fn addLearnedClause(self: *Self, expr: []const Lit, lbd: usize) !ClauseRef {
+        pub fn addLearnedClause(self: *Self, expr: []const Lit, lbd: usize, proof: Proof) !ClauseRef {
             try std.testing.expect(expr.len >= 2);
 
-            var cref = try self.clause_manager.initClause(true, expr);
+            var cref = try self.clause_manager.initClause(true, expr, proof);
             try self.attachClause(cref);
             cref.setLBD(lbd);
             return cref;
@@ -407,7 +439,7 @@ pub fn Solver(comptime ProofManager: type) type {
                 }
             }
 
-            _ = try self.proof_manager.initAxiom(new_expr.items);
+            var proof = try self.proof_manager.initAxiom(new_expr.items);
 
             if (new_expr.items.len == 0) {
                 self.is_unsat = true;
@@ -415,13 +447,13 @@ pub fn Solver(comptime ProofManager: type) type {
             }
 
             if (new_expr.items.len == 1) {
-                try self.mkAssignation(new_expr.items[0], null);
+                try self.mkAssignation(new_expr.items[0], null, proof);
                 if (try self.propagate() != null)
                     self.is_unsat = true;
                 return;
             }
 
-            var cref = try self.clause_manager.initClause(false, new_expr.items);
+            var cref = try self.clause_manager.initClause(false, new_expr.items, proof);
             //for (cref.expr) |lit|
             //    try self.vsids.incrActivity(lit.variable());
             try self.attachClause(cref);
@@ -434,7 +466,9 @@ pub fn Solver(comptime ProofManager: type) type {
             return self.assignation_queue.items[l - 1];
         }
 
-        fn mkAssignation(self: *Self, lit: Lit, cref: ?ClauseRef) !void {
+        fn mkAssignation(self: *Self, lit: Lit, cref: ?ClauseRef, proof: ?Proof) !void {
+            try std.testing.expect(proof != null or self.level != 0);
+
             if (cref) |clause|
                 for (clause.expr) |l|
                     if (l.variable() != lit.variable())
@@ -445,7 +479,12 @@ pub fn Solver(comptime ProofManager: type) type {
             try self.assignation_queue.append(lit);
             try self.propagation_queue.append(lit);
 
-            var st = .{ .level = self.level, .reason = cref, .value = lit.sign() };
+            var st = .{
+                .level = self.level,
+                .reason = cref,
+                .value = lit.sign(),
+                .proof = proof,
+            };
 
             if (cref != null) {
                 self.clause_manager.incrLock(cref.?);
@@ -504,7 +543,7 @@ pub fn Solver(comptime ProofManager: type) type {
                     var num_assign = self.assignation_queue.items.len;
                     try self.lbd_stats.addNumAssign(num_assign);
 
-                    var new_expr = try self.analyse_data.analyze(self, cref);
+                    var new_expr = try self.analyse_data.analyze(ClauseRef, self, cref);
 
                     var lbd = try self.lbd_stats.getLBD(self, new_expr);
                     try self.lbd_stats.append(lbd, new_expr.len);
@@ -525,11 +564,13 @@ pub fn Solver(comptime ProofManager: type) type {
                         } else break;
                     }
 
+                    var proof = try self.proof_manager.initWithLocalState();
+
                     if (new_expr.len == 1) {
-                        try self.mkAssignation(new_expr[0], null);
+                        try self.mkAssignation(new_expr[0], null, proof);
                     } else {
-                        var new_clause = try self.addLearnedClause(new_expr, lbd);
-                        try self.mkAssignation(new_expr[0], new_clause);
+                        var new_clause = try self.addLearnedClause(new_expr, lbd, proof);
+                        try self.mkAssignation(new_expr[0], new_clause, null);
                         self.clause_manager.incrActivity(new_clause);
                     }
 
@@ -560,12 +601,12 @@ pub fn Solver(comptime ProofManager: type) type {
                         decision = self.vsids.mkDecision() orelse return true;
                     self.level += 1;
 
-                    try self.mkAssignation(decision.?, null);
+                    try self.mkAssignation(decision.?, null, null);
                 }
             }
         }
 
-        fn getLitWatchers(self: *Self, lit: Lit) *std.ArrayList(Watcher) {
+        fn getLitWatchers(self: *Self, lit: Lit) *std.ArrayList(Watcher(Proof)) {
             if (lit.sign()) {
                 return &self.variables.items[lit.variable()].pos_watchers;
             } else {
@@ -574,8 +615,8 @@ pub fn Solver(comptime ProofManager: type) type {
         }
 
         fn attachClause(self: *Self, cref: ClauseRef) !void {
-            var w0 = Watcher{ .blocker = cref.expr[1], .cref = cref };
-            var w1 = Watcher{ .blocker = cref.expr[0], .cref = cref };
+            var w0 = Watcher(Proof){ .blocker = cref.expr[1], .cref = cref };
+            var w1 = Watcher(Proof){ .blocker = cref.expr[0], .cref = cref };
 
             try self.getLitWatchers(cref.expr[0]).append(w0);
             try self.getLitWatchers(cref.expr[1]).append(w1);
@@ -609,10 +650,10 @@ pub fn Solver(comptime ProofManager: type) type {
             var self: Self = undefined;
 
             self.proof_manager = ProofManager.init(allocator);
-            self.clause_manager = ClauseManager.init(allocator);
+            self.clause_manager = ClauseManager(Proof).init(allocator);
             self.propagation_queue = std.ArrayList(Lit).init(allocator);
             self.assignation_queue = std.ArrayList(Lit).init(allocator);
-            self.variables = std.ArrayList(VarData).init(allocator);
+            self.variables = std.ArrayList(VarData(Proof)).init(allocator);
             self.vsids = VSIDS.init(allocator);
 
             self.analyse_data = Analyzer.init(allocator);
@@ -703,12 +744,12 @@ pub fn Solver(comptime ProofManager: type) type {
 
             var new_var = @truncate(u31, new_var_usize);
 
-            var new_var_data: VarData = undefined;
+            var new_var_data: VarData(Proof) = undefined;
             new_var_data.state = null;
             new_var_data.pos_watchers =
-                std.ArrayList(Watcher).init(self.allocator);
+                std.ArrayList(Watcher(Proof)).init(self.allocator);
             new_var_data.neg_watchers =
-                std.ArrayList(Watcher).init(self.allocator);
+                std.ArrayList(Watcher(Proof)).init(self.allocator);
 
             try self.variables.append(new_var_data);
             try self.vsids.addVariable();
@@ -819,7 +860,7 @@ pub fn Solver(comptime ProofManager: type) type {
 }
 test "random clause manager test" {
     //var rnd = std.rand.DefaultPrng.init(0);
-    const ProofManager = @import("proof_manager.zig").ProofManager;
+    const ProofManager = @import("proof_manager.zig").EmptyProofManager;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();

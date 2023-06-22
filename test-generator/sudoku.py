@@ -548,12 +548,12 @@ def benchmark(prog):
         #grid = gen_grid(5, 300)
         #constraint = add_sudoku(grid)
 
-        #grid = gen_grid(3, 25)
-        #constraint = Sudoku(grid).constraint
+        grid = gen_grid(3, 25)
+        constraint = Sudoku(grid).constraint
 
-        N = rand(2 ** 20)
-        print(N)
-        constraint = facto(N, 42)
+        #N = rand(2 ** 20)
+        #print(N)
+        #constraint = facto(N, 42)
 
         #grid.print()
         f = open("./test.cnf", "w")
