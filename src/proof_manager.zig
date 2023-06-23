@@ -35,21 +35,21 @@ pub const Proof = union(enum) {
         }
     }
 
-    fn updateAddr(self: Self, addr: ProofRef) void {
-        switch (self) {
+    fn updateAddr(self: *Self, addr: ProofRef) void {
+        switch (self.*) {
             .resolution => |*res| res.pref = addr,
             else => @panic("cannot update the reference to an axiom"),
         }
     }
 
     fn setKeepTrue(self: *Self) void {
-        switch (self) {
+        switch (self.*) {
             .resolution => |*res| {
                 if (res.keep) return;
                 res.keep = true;
 
                 for (res.steps) |step|
-                    step.setKeepTrue();
+                    step.proof.setKeepTrue();
             },
             else => {},
         }
@@ -133,14 +133,17 @@ pub const ProofManager = struct {
     }
 
     pub fn keep(self: *Self, proof: ProofRef) void {
-        proof.setKepTrue();
+        proof.setKeepTrue();
         _ = self;
     }
 
-    pub fn newAddr(self: *Self, proof: ProofRef) ?ProofRef {
+    pub fn newAddr(self: *Self, proof: ProofRef) ProofRef {
         _ = self;
 
-        return proof.newAddr();
+        if (proof.newAddr()) |p| {
+            return p;
+        }
+        return proof;
     }
 
     pub fn init(allocator: std.mem.Allocator) Self {
@@ -186,8 +189,8 @@ pub const ProofManager = struct {
             var proof = self.resolutions.items[index];
 
             if (proof.resolution.keep) {
-                var new_steps = try allocator.alloc(ProofRef, proof.resolution.steps.len);
-                std.mem.copy(ProofRef, new_steps, proof.resolution.steps);
+                var new_steps = try allocator.alloc(Resolution.ResStep, proof.resolution.steps.len);
+                std.mem.copy(Resolution.ResStep, new_steps, proof.resolution.steps);
                 proof.resolution.steps = new_steps;
 
                 var new_proof = try allocator.create(Proof);
@@ -201,9 +204,9 @@ pub const ProofManager = struct {
             }
         }
 
-        for (self.resolutions.items) |*proof| {
-            for (proof.resolution.steps) |step| {
-                step.proof = step.proof.newAddr();
+        for (self.resolutions.items) |proof| {
+            for (proof.resolution.steps) |*step| {
+                step.proof = self.newAddr(step.proof);
             }
             proof.resolution.keep = false;
         }
@@ -246,15 +249,14 @@ pub const EmptyProofManager = struct {
         return {};
     }
 
-    pub fn keep(self: *Self, proof: ProofRef) void {
-        proof.setKepTrue();
+    pub fn keep(self: *Self, proof: ProofType) void {
+        _ = proof;
         _ = self;
     }
 
-    pub fn newAddr(self: *Self, proof: ProofType) ?ProofType {
-        _ = proof;
+    pub fn newAddr(self: *Self, proof: ProofType) ProofType {
         _ = self;
-        return null;
+        return proof;
     }
 
     pub fn init(allocator: std.mem.Allocator) Self {

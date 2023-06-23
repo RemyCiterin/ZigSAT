@@ -672,6 +672,7 @@ pub fn Solver(comptime ProofManager: type) type {
         /// and all the link from the solver for these clauses
         pub fn garbadgeCollect(self: *Self, factor: f64) !void {
             self.stats.addGC();
+            try self.proofGC();
 
             try self.clause_manager.garbadgeCollect(factor);
             std.debug.print("{}  ", .{@floatToInt(usize, self.lbd_stats.mean_size)});
@@ -856,11 +857,49 @@ pub fn Solver(comptime ProofManager: type) type {
 
             return;
         }
+
+        pub fn proofGC(self: *Self) !void {
+            for (self.variables.items) |var_data| {
+                if (var_data.state) |state| {
+                    if (state.proof) |proof| {
+                        self.proof_manager.keep(proof);
+                    }
+                }
+            }
+
+            for (self.clause_manager.initial_clauses.items) |cref| {
+                self.proof_manager.keep(cref.proof);
+            }
+
+            for (self.clause_manager.learned_clauses.items) |cref| {
+                self.proof_manager.keep(cref.proof);
+            }
+
+            try self.proof_manager.garbadgeCollect();
+
+            for (self.variables.items) |*var_data| {
+                if (var_data.state) |*state| {
+                    if (state.proof) |*proof| {
+                        proof.* = self.proof_manager.newAddr(proof.*);
+                    }
+                }
+            }
+
+            for (self.clause_manager.initial_clauses.items) |cref| {
+                cref.proof = self.proof_manager.newAddr(cref.proof);
+            }
+
+            for (self.clause_manager.learned_clauses.items) |cref| {
+                cref.proof = self.proof_manager.newAddr(cref.proof);
+            }
+
+            self.proof_manager.applyGC();
+        }
     };
 }
 test "random clause manager test" {
     //var rnd = std.rand.DefaultPrng.init(0);
-    const ProofManager = @import("proof_manager.zig").EmptyProofManager;
+    const ProofManager = @import("proof_manager.zig").ProofManager;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
