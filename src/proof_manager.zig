@@ -1,6 +1,9 @@
 const std = @import("std");
 const Lit = @import("lit.zig").Lit;
+const Variable = @import("lit.zig").Variable;
 const lbool = @import("lit.zig").lbool;
+
+const generateClause = @import("lit.zig").generateClause;
 
 pub const Axiom = struct {
     expr: []Lit,
@@ -8,7 +11,7 @@ pub const Axiom = struct {
 
 /// a resolution chain is a list of resolution step apply to a base proof
 pub const Resolution = struct {
-    pub const ResStep = struct { lit: Lit, proof: ProofRef };
+    pub const ResStep = struct { variable: Variable, proof: ProofRef };
 
     /// base of the resolution chain
     base: ProofRef,
@@ -18,6 +21,9 @@ pub const Resolution = struct {
 
     /// reference to it's valid representation in memory, usefull for garbadge collection
     pref: ProofRef,
+
+    /// expression value for proof checking
+    expr: ?[]Lit = null,
 
     /// if true: keep the proof a the next garbadge collection step
     keep: bool = false,
@@ -48,6 +54,7 @@ pub const Proof = union(enum) {
                 if (res.keep) return;
                 res.keep = true;
 
+                res.base.setKeepTrue();
                 for (res.steps) |step|
                     step.proof.setKeepTrue();
             },
@@ -76,22 +83,94 @@ pub const ProofManager = struct {
     /// set of resolution chains of the solver
     resolutions: std.ArrayList(ProofRef),
 
-    ///
+    /// base of the next resolution returned by the proof manager
     local_base: ?ProofRef,
 
-    ///
+    /// set of resolution steps used to resolve the current base
     local_steps: std.ArrayList(Resolution.ResStep),
+
+    /// data structure used to apply the resolutions
+    local_expr: std.ArrayList(Lit),
+
+    copy_expr: std.ArrayList(Lit),
 
     const Self = @This();
     pub const ProofType = ProofRef;
+    pub const GenProof = true;
+
+    pub fn getExpr(self: *Self, proof: ProofRef) ?[]const Lit {
+        _ = self;
+
+        switch (proof.*) {
+            .axiom => |axiom| return axiom.expr,
+            .resolution => |state| return state.expr,
+        }
+    }
+
+    pub fn setExpr(self: *Self, proof: ProofRef) !void {
+        if (self.getExpr(proof)) |_| {
+            return;
+        }
+
+        var state = &proof.resolution;
+
+        try self.setExpr(state.base);
+        for (state.steps) |step| {
+            try self.setExpr(step.proof);
+        }
+
+        self.local_expr.clearRetainingCapacity();
+        for (self.getExpr(state.base).?) |lit| {
+            try self.local_expr.append(lit);
+        }
+
+        for (state.steps) |step| {
+            var seen: ?Lit = null;
+
+            var index: usize = 0;
+            while (index < self.local_expr.items.len) {
+                if (self.local_expr.items[index].variable() == step.variable) {
+                    try std.testing.expect(seen == null);
+                    seen = self.local_expr.items[index];
+
+                    _ = self.local_expr.swapRemove(index);
+                } else {
+                    index += 1;
+                }
+            }
+
+            try std.testing.expect(seen != null);
+
+            for (self.getExpr(step.proof).?) |lit| {
+                if (lit.variable() != step.variable) {
+                    try self.local_expr.append(lit);
+                } else {
+                    try std.testing.expect(seen != null and seen.?.not().equals(lit));
+                    seen = null;
+                }
+            }
+
+            try std.testing.expect(seen == null);
+
+            self.copy_expr.clearRetainingCapacity();
+            for (self.local_expr.items) |lit| {
+                try self.copy_expr.append(lit);
+            }
+            _ = try generateClause(&self.local_expr, self.copy_expr.items);
+        }
+
+        var expr = try self.main_arena.allocator().alloc(Lit, self.local_expr.items.len);
+        std.mem.copy(Lit, expr, self.local_expr.items);
+        proof.resolution.expr = expr;
+    }
 
     pub fn clear(self: *Self) void {
         self.local_base = null;
         self.local_steps.clearRetainingCapacity();
     }
 
-    pub fn pushStep(self: *Self, lit: Lit, proof: ProofRef) !void {
-        try self.local_steps.append(.{ .proof = proof, .lit = lit });
+    pub fn pushStep(self: *Self, variable: Variable, proof: ProofRef) !void {
+        try self.local_steps.append(.{ .proof = proof, .variable = variable });
     }
 
     pub fn setBase(self: *Self, base: ProofRef) void {
@@ -100,6 +179,9 @@ pub const ProofManager = struct {
     }
 
     pub fn initWithLocalState(self: *Self) !ProofRef {
+        if (self.local_steps.items.len == 0)
+            return self.local_base.?;
+
         var allocator = self.main_arena.allocator();
 
         var steps = try allocator.alloc(Resolution.ResStep, self.local_steps.items.len);
@@ -112,10 +194,12 @@ pub const ProofManager = struct {
                 .steps = steps,
                 .base = self.local_base.?,
                 .pref = proof,
+                .expr = null,
             },
         };
 
         try self.resolutions.append(proof);
+        //try self.setExpr(proof);
 
         return proof;
     }
@@ -160,10 +244,15 @@ pub const ProofManager = struct {
         self.axioms = std.ArrayList(ProofRef).init(allocator);
         self.resolutions = std.ArrayList(ProofRef).init(allocator);
 
+        self.local_expr = std.ArrayList(Lit).init(allocator);
+        self.copy_expr = std.ArrayList(Lit).init(allocator);
+
         return self;
     }
 
     pub fn deinit(self: *Self) void {
+        self.local_expr.deinit();
+        self.copy_expr.deinit();
         self.main_arena.deinit();
         self.transition_arena.deinit();
 
@@ -191,7 +280,15 @@ pub const ProofManager = struct {
             if (proof.resolution.keep) {
                 var new_steps = try allocator.alloc(Resolution.ResStep, proof.resolution.steps.len);
                 std.mem.copy(Resolution.ResStep, new_steps, proof.resolution.steps);
+
                 proof.resolution.steps = new_steps;
+                //proof.resolution.expr = null;
+
+                if (proof.resolution.expr) |expr| {
+                    var new_expr = try allocator.alloc(Lit, expr.len);
+                    std.mem.copy(Lit, new_expr, expr);
+                    proof.resolution.expr = new_expr;
+                }
 
                 var new_proof = try allocator.create(Proof);
                 proof.updateAddr(new_proof);
@@ -205,6 +302,7 @@ pub const ProofManager = struct {
         }
 
         for (self.resolutions.items) |proof| {
+            proof.resolution.base = self.newAddr(proof.resolution.base);
             for (proof.resolution.steps) |*step| {
                 step.proof = self.newAddr(step.proof);
             }
@@ -221,6 +319,7 @@ pub const ProofManager = struct {
 
 pub const EmptyProofManager = struct {
     pub const ProofType = void;
+    pub const GenProof = false;
 
     const Self = @This();
 
@@ -228,10 +327,10 @@ pub const EmptyProofManager = struct {
         _ = self;
     }
 
-    pub fn pushStep(self: *Self, lit: Lit, proof: ProofType) !void {
+    pub fn pushStep(self: *Self, v: Variable, proof: ProofType) !void {
         _ = proof;
         _ = self;
-        _ = lit;
+        _ = v;
     }
 
     pub fn setBase(self: *Self, base: ProofType) void {

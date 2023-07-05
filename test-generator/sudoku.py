@@ -545,20 +545,22 @@ def benchmark(prog):
         print(time.time()-t)
 
     for _ in range(30):
-        #grid = gen_grid(5, 300)
+        #grid = gen_grid(5, 250)
         #constraint = add_sudoku(grid)
 
-        grid = gen_grid(3, 25)
-        constraint = Sudoku(grid).constraint
+        #grid = gen_grid(3, 25)
+        #constraint = Sudoku(grid).constraint
 
-        #N = rand(2 ** 20)
-        #print(N)
-        #constraint = facto(N, 42)
+        N = rand(2 ** 20)
+        print(N)
+        constraint = facto(N, 42)
 
         #grid.print()
+        time.sleep(0.1)
         f = open("./test.cnf", "w")
         f.write(str(constraint))
         f.close()
+
 
         if len(queue) < threads:
             busy[len(queue)] = True
@@ -587,14 +589,16 @@ def benchmark(prog):
 
 
 
-#plt.plot(np.sort(benchmark(
-#    ['kissat', 'test.cnf'])), label='kissat')
+plt.plot(np.sort(benchmark(
+    ['kissat', 'test.cnf'])), label='kissat')
 plt.plot(np.sort(benchmark(
     ['../zig-out/bin/ZigSAT', 'test.cnf'])), label="ZigSAT")
 plt.plot(np.sort(benchmark(
-    ['../minisat', 'test.cnf', '-ccmin-mode=1', '-phase-saving=2', '-no-luby'])), label="minisat")
+    ['../mathsat', '-input=dimacs', 'test.cnf'])), label="mathsat")
 plt.plot(np.sort(benchmark(
-    ['../glucose_static', 'test.cnf', '-ccmin-mode=1', '-phase-saving=2'])), label="glucose2")
+    ['../minisat', 'test.cnf', '-ccmin-mode=1', '-phase-saving=2', '-no-luby'])), label="minisat")
+#plt.plot(np.sort(benchmark(
+#    ['../glucose_static', 'test.cnf', '-ccmin-mode=1', '-phase-saving=2'])), label="glucose2")
 plt.plot(np.sort(benchmark(
     ['glucose', 'test.cnf', '-no-pre', '-ccmin-mode=1', '-phase-saving=2'])), label="glucose4")
 plt.yscale("log")

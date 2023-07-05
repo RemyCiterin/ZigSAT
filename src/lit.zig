@@ -137,6 +137,37 @@ pub const Lit = union(LitTag) {
 pub const lit_undef: Lit = Lit.lit_undef;
 pub const lit_error: Lit = Lit.lit_error;
 
+/// return true if the clause is trivialy unsat
+pub fn generateClause(new_expr: *std.ArrayList(Lit), expr: []Lit) !bool {
+    const sortFn = struct {
+        fn lessThan(ctx: void, l1: Lit, l2: Lit) bool {
+            _ = ctx;
+
+            if (l1.variable() != l2.variable())
+                return l1.variable() < l2.variable();
+
+            return l1.sign() and !l2.sign();
+        }
+    };
+
+    new_expr.clearRetainingCapacity();
+
+    std.sort.sort(Lit, expr, {}, sortFn.lessThan);
+
+    var l: ?Lit = null;
+    for (expr) |lit| {
+        if (l != null and lit.equals(l.?.not()))
+            return true;
+
+        if (l == null or !lit.equals(l.?)) {
+            try new_expr.append(lit);
+            l = lit;
+        }
+    }
+
+    return false;
+}
+
 test "test lit" {
     var rnd = std.rand.DefaultPrng.init(0);
 

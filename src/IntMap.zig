@@ -69,14 +69,27 @@ pub fn IntMap(comptime T: type, comptime V: type, comptime to_usize: anytype) ty
             self.queue_inverse.items[to_usize(x)] = null;
             self.values.items[to_usize(x)] = null;
             _ = self.queue.pop();
+
+            //if (!self.inSet(x)) return;
+
+            //var end = self.queue.items.len - 1;
+            //self.swap(end, self.queue_inverse.items[to_usize(x)] orelse unreachable);
+            //self.queue_inverse.items[to_usize(x)] = null;
+            //_ = self.queue.pop();
         }
 
         pub fn clear(self: *Self) void {
-            while (self.queue.items.len > 0) {
-                self.queue_inverse.items[self.queue.items.len - 1] = null;
-                self.values.items[self.queue.items.len - 1] = null;
-                _ = self.queue.pop();
+            for (self.queue.items) |x| {
+                self.queue_inverse.items[to_usize(x)] = null;
+                self.values.items[to_usize(x)] = null;
             }
+            self.queue.clearRetainingCapacity();
+
+            //while (self.queue.items.len > 0) {
+            //    self.queue_inverse.items[self.queue.items.len - 1] = null;
+            //    self.values.items[self.queue.items.len - 1] = null;
+            //    _ = self.queue.pop();
+            //}
         }
     };
 }

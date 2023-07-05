@@ -21,6 +21,8 @@ const Clause = @import("clause.zig").Clause;
 // uninterpreted functions, linear arithmetic...
 const TSolver = @import("theory_solver.zig").TSolver;
 
+const generateClause = @import("lit.zig").generateClause;
+
 /// when a clause watch a variable (the variable is one of the two
 /// first literals of it's expression), we store this clause
 /// (to detect efficiently unit propagation) and
@@ -38,6 +40,7 @@ fn AssignedVarState(comptime Proof: type) type {
         level: u32,
         value: bool,
         reason: ?*Clause(Proof),
+        position: usize,
         proof: ?Proof,
     };
 }
@@ -117,6 +120,8 @@ pub fn Solver(comptime ProofManager: type) type {
     return struct {
         pub const Proof = ProofManager.ProofType;
         pub const ClauseRef = ClauseManager(Proof).ClauseRef;
+
+        gen_proof: bool = ProofManager.GenProof,
 
         /// set of all the assignation of the solver, usefull for backtracking,
         /// if a literal `lit` is in the assignation queue, and `self.reasonOf(lit.variable()) != null`
@@ -303,7 +308,10 @@ pub fn Solver(comptime ProofManager: type) type {
 
                     k = 1;
                     while (k < cref.expr.len) : (k += 1) {
-                        try self.proof_manager.pushStep(cref.expr[k], self.proofOf(cref.expr[k].variable()));
+                        try self.proof_manager.pushStep(
+                            cref.expr[k].variable(),
+                            self.proofOf(cref.expr[k].variable()),
+                        );
                     }
 
                     proof = try self.proof_manager.initWithLocalState();
@@ -326,6 +334,10 @@ pub fn Solver(comptime ProofManager: type) type {
 
         pub fn reasonOf(self: *Self, variable: Variable) ?ClauseRef {
             return self.variables.items[variable].state.?.reason;
+        }
+
+        pub fn positionOf(self: *Self, variable: Variable) usize {
+            return self.variables.items[variable].state.?.position;
         }
 
         pub fn print(self: *Self) void {
@@ -411,35 +423,29 @@ pub fn Solver(comptime ProofManager: type) type {
                 return;
             }
 
-            const sortFn = struct {
-                fn lessThan(ctx: void, l1: Lit, l2: Lit) bool {
-                    _ = ctx;
-
-                    if (l1.variable() != l2.variable())
-                        return l1.variable() < l2.variable();
-
-                    return l1.sign() and !l2.sign();
-                }
-            };
-
             var new_expr = std.ArrayList(Lit).init(self.allocator);
             defer new_expr.deinit();
 
-            std.sort.sort(Lit, new_expr.items, {}, sortFn.lessThan);
+            if (try generateClause(&new_expr, expr))
+                return;
 
-            var i: usize = 0;
-            var l: ?Lit = null;
-            while (i < expr.len) : (i += 1) {
-                if ((l != null and expr[i].equals(l.?.not())) or self.value(expr[i]) == .ltrue)
+            var proof = try self.proof_manager.initAxiom(new_expr.items);
+            self.proof_manager.setBase(proof);
+
+            var index: usize = 0;
+            while (index < new_expr.items.len) {
+                var lit = new_expr.items[index];
+                if (self.value(lit) == .lfalse) {
+                    try self.proof_manager.pushStep(lit.variable(), self.proofOf(lit.variable()));
+                    _ = new_expr.swapRemove(index);
+                } else if (self.value(lit) == .ltrue) {
                     return;
-
-                if (self.value(expr[i]) != .lfalse and (l == null or !expr[i].equals(l.?))) {
-                    try new_expr.append(expr[i]);
-                    l = expr[i];
+                } else {
+                    index += 1;
                 }
             }
 
-            var proof = try self.proof_manager.initAxiom(new_expr.items);
+            proof = try self.proof_manager.initWithLocalState();
 
             if (new_expr.items.len == 0) {
                 self.is_unsat = true;
@@ -454,8 +460,6 @@ pub fn Solver(comptime ProofManager: type) type {
             }
 
             var cref = try self.clause_manager.initClause(false, new_expr.items, proof);
-            //for (cref.expr) |lit|
-            //    try self.vsids.incrActivity(lit.variable());
             try self.attachClause(cref);
         }
 
@@ -468,6 +472,7 @@ pub fn Solver(comptime ProofManager: type) type {
 
         fn mkAssignation(self: *Self, lit: Lit, cref: ?ClauseRef, proof: ?Proof) !void {
             try std.testing.expect(proof != null or self.level != 0);
+            try std.testing.expect(proof == null or self.level == 0);
 
             if (cref) |clause|
                 for (clause.expr) |l|
@@ -476,15 +481,16 @@ pub fn Solver(comptime ProofManager: type) type {
 
             try std.testing.expect(self.value(lit) == .lundef);
 
-            try self.assignation_queue.append(lit);
-            try self.propagation_queue.append(lit);
-
             var st = .{
                 .level = self.level,
                 .reason = cref,
+                .position = self.assignation_queue.items.len,
                 .value = lit.sign(),
                 .proof = proof,
             };
+
+            try self.assignation_queue.append(lit);
+            try self.propagation_queue.append(lit);
 
             if (cref != null) {
                 self.clause_manager.incrLock(cref.?);
@@ -535,7 +541,15 @@ pub fn Solver(comptime ProofManager: type) type {
             if (self.is_unsat) return false;
             while (true) {
                 if (try self.propagate()) |cref| {
-                    if (self.level == 0) return false;
+                    if (self.level == 0) {
+                        if (ProofManager.GenProof) {
+                            var proof = cref.proof;
+                            try self.proof_manager.setExpr(proof);
+                            var expr = self.proof_manager.getExpr(proof).?;
+                            std.debug.print("{}", .{expr.len});
+                        }
+                        return false;
+                    }
 
                     self.stats.addConflict();
                     restart_conflicts += 1;
@@ -544,6 +558,7 @@ pub fn Solver(comptime ProofManager: type) type {
                     try self.lbd_stats.addNumAssign(num_assign);
 
                     var new_expr = try self.analyse_data.analyze(ClauseRef, self, cref);
+                    var proof = try self.proof_manager.initWithLocalState();
 
                     var lbd = try self.lbd_stats.getLBD(self, new_expr);
                     try self.lbd_stats.append(lbd, new_expr.len);
@@ -563,8 +578,6 @@ pub fn Solver(comptime ProofManager: type) type {
                             _ = try self.dequeueAssignation();
                         } else break;
                     }
-
-                    var proof = try self.proof_manager.initWithLocalState();
 
                     if (new_expr.len == 1) {
                         try self.mkAssignation(new_expr[0], null, proof);
@@ -899,7 +912,7 @@ pub fn Solver(comptime ProofManager: type) type {
 }
 test "random clause manager test" {
     //var rnd = std.rand.DefaultPrng.init(0);
-    const ProofManager = @import("proof_manager.zig").ProofManager;
+    const ProofManager = @import("proof_manager.zig").EmptyProofManager;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
