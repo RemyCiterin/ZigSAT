@@ -2,5 +2,6 @@ zig-cache
 zig-out
 minisat
 minisat-2.2.0/
+MapleSAT/
 glucose/
 glucose_static

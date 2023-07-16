@@ -154,3 +154,41 @@ pub fn analyze(self: *Self, comptime ClauseRef: type, context: anytype, cref: Cl
 
     return self.result.items;
 }
+
+pub fn analyzeFinal(self: *Self, comptime ClauseRef: type, context: anytype, lit: Lit) ![]const Lit {
+    _ = ClauseRef;
+    self.clear();
+
+    try self.result.append(lit);
+
+    if (context.level == 0) {
+        return self.result.items;
+    }
+
+    try self.int_map.insert(lit.variable(), true);
+
+    var index = context.assignation_queue.items.len - 1;
+
+    while (true) : (index -= 1) {
+        var l = context.assignation_queue.items[index];
+        var v = l.variable();
+
+        if (context.levelOf(v) == 0)
+            break;
+
+        if (self.int_map.inMap(v)) {
+            if (context.reasonOf(v)) |cref| {
+                for (cref.expr) |x| {
+                    if (context.levelOf(x.variable()) > 0)
+                        try self.int_map.insert(x.variable(), true);
+                }
+            } else {
+                try self.result.append(l.not());
+            }
+            self.int_map.remove(v);
+        }
+        if (index == 0) break;
+    }
+
+    return self.result.items;
+}

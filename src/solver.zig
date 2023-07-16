@@ -601,8 +601,11 @@ pub fn Solver(comptime ProofManager: type) type {
                     var decision: ?Lit = null;
 
                     for (assumptions) |lit| {
-                        if (self.value(lit) == .lfalse)
+                        if (self.value(lit) == .lfalse) {
+                            var expr = try self.analyse_data.analyzeFinal(ClauseRef, self, lit.not());
+                            std.debug.print("{}\n", .{expr.len});
                             return false;
+                        }
 
                         if (self.value(lit) == .lundef) {
                             decision = lit;
@@ -964,6 +967,7 @@ test "random clause manager test" {
             //if (!skip_file) continue;
 
             const assumptions: [0]Lit = undefined;
+
             var b = try solver.cdcl(assumptions[0..]);
             if (b) try std.testing.expect(solver.checkModel());
             std.debug.print("{}\n", .{b});
