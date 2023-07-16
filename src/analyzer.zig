@@ -34,8 +34,6 @@ pub fn deinit(self: *Self) void {
 pub fn analyze(self: *Self, comptime ClauseRef: type, context: anytype, cref: ClauseRef) ![]const Lit {
     self.clear();
 
-    context.proof_manager.setBase(cref.proof);
-
     for (cref.expr) |lit|
         try std.testing.expect(context.value(lit) == .lfalse);
 
@@ -81,75 +79,25 @@ pub fn analyze(self: *Self, comptime ClauseRef: type, context: anytype, cref: Cl
         IP_counter -= 1;
 
         if (IP_counter == 0) break;
-
-        try context.proof_manager.pushStep(pivot.?.variable(), clause.?.proof);
     }
 
-    //const sortFn = struct {
-    //    fn lessThan(ctx: @TypeOf(context), l1: Lit, l2: Lit) bool {
-    //        return ctx.positionOf(l1.variable()) < ctx.positionOf(l2.variable());
-    //    }
-    //};
+    index = 1;
+    minimize_loop: while (index < self.result.items.len) {
+        var v = self.result.items[index].variable();
 
-    //std.sort.sort(Lit, self.result.items[1..], context, sortFn.lessThan);
+        var reason = context.reasonOf(v) orelse {
+            index += 1;
+            continue;
+        };
 
-    //var seen: usize = self.result.items.len - 1;
-
-    //minimize_loop: while (seen > 0) {
-    //    while (!self.int_map.inMap(context.assignation_queue.items[index].variable())) : (index -= 1) {}
-    //    seen -= 1;
-
-    //    var lit = context.assignation_queue.items[index];
-
-    //    if (!self.int_map.get(lit.variable())) {
-    //        index -= 1;
-    //        continue;
-    //    }
-
-    //    var reason = context.reasonOf(lit.variable()) orelse {
-    //        index -= 1;
-    //        continue;
-    //    };
-
-    //    for (reason.expr) |l| {
-    //        if (!self.int_map.inMap(l.variable())) {
-    //            index -= 1;
-    //            continue :minimize_loop;
-    //        }
-    //    }
-
-    //    try self.int_map.insert(lit.variable(), false);
-    //    try context.proof_manager.pushStep(lit.variable(), reason.proof);
-    //}
-
-    //index = 1;
-    //while (index < self.result.items.len) {
-    //    if (!self.int_map.get(self.result.items[index].variable())) {
-    //        _ = self.result.swapRemove(index);
-    //    } else {
-    //        index += 1;
-    //    }
-    //}
-
-    if (context.gen_proof) {
-        index = 1;
-        minimize_loop: while (index < self.result.items.len) {
-            var v = self.result.items[index].variable();
-
-            var reason = context.reasonOf(v) orelse {
+        for (reason.expr) |l| {
+            if (!self.int_map.inMap(l.variable())) {
                 index += 1;
-                continue;
-            };
-
-            for (reason.expr) |l| {
-                if (!self.int_map.inMap(l.variable())) {
-                    index += 1;
-                    continue :minimize_loop;
-                }
+                continue :minimize_loop;
             }
-
-            _ = self.result.swapRemove(index);
         }
+
+        _ = self.result.swapRemove(index);
     }
 
     return self.result.items;
