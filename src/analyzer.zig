@@ -131,7 +131,7 @@ pub fn analyze(self: *Self, comptime ClauseRef: type, context: anytype, cref: Cl
     //    }
     //}
 
-    if (context.gen_proof) {
+    if (!context.gen_proof) {
         index = 1;
         minimize_loop: while (index < self.result.items.len) {
             var v = self.result.items[index].variable();
