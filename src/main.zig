@@ -13,9 +13,8 @@ pub fn main() !void {
     var expr = std.ArrayList(Lit).init(allocator);
     defer expr.deinit();
 
-    const ProofManager = @import("proof_manager.zig").EmptyProofManager;
-
-    var solver = try Solver(ProofManager).init(allocator);
+    var solver = try Solver(void).init(allocator);
+    solver.verbose = 1;
     defer solver.deinit();
 
     var file_path = std.ArrayList(u8).init(allocator);

@@ -132,11 +132,17 @@ pub fn Solver(comptime Nothing: type) type {
         /// use and compute lbd
         lbd_stats: LBDstats,
 
+        /// result of the final analysis
+        final_conflict: std.ArrayList(Lit),
+
         /// an lbd to analyse the last conflict
         analyse_data: Analyzer,
 
         /// an heap for VSIDS heuristic
         vsids: VSIDS,
+
+        /// level of verbosity
+        verbose: i32,
 
         /// allocator of the solver
         allocator: std.mem.Allocator,
@@ -499,6 +505,7 @@ pub fn Solver(comptime Nothing: type) type {
             while (true) {
                 if (try self.propagate()) |cref| {
                     if (self.level == 0) {
+                        self.final_conflict.clearRetainingCapacity();
                         return false;
                     }
 
@@ -551,8 +558,12 @@ pub fn Solver(comptime Nothing: type) type {
                     var decision: ?Lit = null;
 
                     for (assumptions) |lit| {
-                        if (self.value(lit) == .lfalse)
+                        if (self.value(lit) == .lfalse) {
+                            var res = try self.analyse_data.analyzeFinal(ClauseRef, self, lit.not());
+                            self.final_conflict.clearRetainingCapacity();
+                            try self.final_conflict.appendSlice(res);
                             return false;
+                        }
 
                         if (self.value(lit) == .lundef) {
                             decision = lit;
@@ -615,6 +626,7 @@ pub fn Solver(comptime Nothing: type) type {
             self.clause_manager = ClauseManager.init(allocator);
             self.propagation_queue = std.ArrayList(Lit).init(allocator);
             self.assignation_queue = std.ArrayList(Lit).init(allocator);
+            self.final_conflict = std.ArrayList(Lit).init(allocator);
             self.variables = std.ArrayList(VarData).init(allocator);
             self.vsids = VSIDS.init(allocator);
 
@@ -624,6 +636,7 @@ pub fn Solver(comptime Nothing: type) type {
             self.allocator = allocator;
             self.is_unsat = false;
             self.level = 0;
+            self.verbose = 0;
 
             self.stats = SolverStats.init();
 
@@ -636,9 +649,12 @@ pub fn Solver(comptime Nothing: type) type {
             self.stats.addGC();
 
             try self.clause_manager.garbadgeCollect(factor);
-            std.debug.print("{}  ", .{@floatToInt(usize, self.lbd_stats.mean_size)});
-            std.debug.print("{}  ", .{self.clause_manager.learned_clauses.items.len});
-            self.stats.print(self.progressEstimate());
+
+            if (self.verbose >= 1) {
+                std.debug.print("{}  ", .{@floatToInt(usize, self.lbd_stats.mean_size)});
+                std.debug.print("{}  ", .{self.clause_manager.learned_clauses.items.len});
+                self.stats.print(self.progressEstimate());
+            }
 
             for (self.variables.items) |*var_data| {
                 var i: usize = 0;
@@ -682,6 +698,7 @@ pub fn Solver(comptime Nothing: type) type {
         pub fn deinit(self: *Self) void {
             self.propagation_queue.deinit();
             self.assignation_queue.deinit();
+            self.final_conflict.deinit();
             self.analyse_data.deinit();
             self.lbd_stats.deinit();
             self.vsids.deinit();
@@ -841,6 +858,7 @@ test "random clause manager test" {
         if (entry.kind == .File) {
             var solver = try Solver(void).init(allocator);
             defer solver.deinit();
+            solver.verbose = 1;
 
             const file_path =
                 try std.fmt.allocPrint(allocator, "tests_competition/{s}", .{entry.name});
