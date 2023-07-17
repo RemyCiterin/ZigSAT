@@ -498,14 +498,15 @@ pub fn Solver(comptime Nothing: type) type {
         }
 
         pub fn cdcl(self: *Self, assumptions: []const Lit) !bool {
+            self.final_conflict.clearRetainingCapacity();
             var restart_conflicts: usize = 0;
+            try self.restart();
 
             try self.simplify();
             if (self.is_unsat) return false;
             while (true) {
                 if (try self.propagate()) |cref| {
                     if (self.level == 0) {
-                        self.final_conflict.clearRetainingCapacity();
                         return false;
                     }
 
@@ -560,7 +561,6 @@ pub fn Solver(comptime Nothing: type) type {
                     for (assumptions) |lit| {
                         if (self.value(lit) == .lfalse) {
                             var res = try self.analyse_data.analyzeFinal(ClauseRef, self, lit.not());
-                            self.final_conflict.clearRetainingCapacity();
                             try self.final_conflict.appendSlice(res);
                             return false;
                         }
@@ -895,6 +895,7 @@ test "random clause manager test" {
             std.debug.print("{}\n", .{b});
 
             if (!b) {
+                std.debug.print("final analyze length: {}\n", .{solver.final_conflict.items.len});
                 const result = try std.ChildProcess.exec(.{
                     .allocator = std.heap.page_allocator,
                     .argv = &[_][]const u8{
