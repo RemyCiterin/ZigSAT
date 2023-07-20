@@ -3,4 +3,5 @@ zig-out
 minisat
 minisat-2.2.0/
 glucose/
+mathsat
 glucose_static

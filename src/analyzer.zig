@@ -31,7 +31,7 @@ pub fn deinit(self: *Self) void {
     self.int_map.deinit();
 }
 
-pub fn analyze(self: *Self, comptime ClauseRef: type, context: anytype, cref: ClauseRef) ![]const Lit {
+pub fn analyze(self: *Self, comptime Context: type, context: *Context, cref: Context.ClauseRef) ![]const Lit {
     self.clear();
 
     for (cref.expr) |lit|
@@ -41,7 +41,7 @@ pub fn analyze(self: *Self, comptime ClauseRef: type, context: anytype, cref: Cl
 
     var IP_counter: usize = 0; // number of implication points of the current clause
     var index = context.assignation_queue.items.len - 1;
-    var clause: ?ClauseRef = cref;
+    var clause: ?Context.ClauseRef = cref;
     var pivot: ?Lit = null;
 
     while (true) {
@@ -103,8 +103,7 @@ pub fn analyze(self: *Self, comptime ClauseRef: type, context: anytype, cref: Cl
     return self.result.items;
 }
 
-pub fn analyzeFinal(self: *Self, comptime ClauseRef: type, context: anytype, lit: Lit) ![]const Lit {
-    _ = ClauseRef;
+pub fn analyzeFinal(self: *Self, comptime Context: type, context: Context, lit: Lit) ![]const Lit {
     self.clear();
 
     try self.result.append(lit);

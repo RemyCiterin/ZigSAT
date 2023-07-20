@@ -301,16 +301,12 @@ pub fn Solver(comptime Nothing: type) type {
             return null;
         }
 
-        pub fn levelOf(self: *Self, variable: Variable) u32 {
+        pub fn levelOf(self: Self, variable: Variable) u32 {
             return self.variables.items[variable].state.?.level;
         }
 
-        pub fn reasonOf(self: *Self, variable: Variable) ?ClauseRef {
+        pub fn reasonOf(self: Self, variable: Variable) ?ClauseRef {
             return self.variables.items[variable].state.?.reason;
-        }
-
-        pub fn positionOf(self: *Self, variable: Variable) usize {
-            return self.variables.items[variable].state.?.position;
         }
 
         pub fn print(self: *Self) void {
@@ -325,7 +321,7 @@ pub fn Solver(comptime Nothing: type) type {
             std.debug.print("\n", .{});
         }
 
-        pub fn value(self: *Self, lit: Lit) lbool {
+        pub fn value(self: Self, lit: Lit) lbool {
             var st: VarState = self.variables.items[lit.variable()].state;
 
             if (st == null) return .lundef;
@@ -361,21 +357,21 @@ pub fn Solver(comptime Nothing: type) type {
                 index += 1;
             }
 
-            index = 0;
-            main_loop: while (index < self.clause_manager.initial_clauses.items.len) {
-                var cref = self.clause_manager.initial_clauses.items[index];
+            //index = 0;
+            //main_loop: while (index < self.clause_manager.initial_clauses.items.len) {
+            //    var cref = self.clause_manager.initial_clauses.items[index];
 
-                for (cref.expr) |lit| {
-                    if (self.value(lit) == .ltrue) {
-                        self.removeClause(cref);
-                        _ = self.clause_manager.initial_clauses.swapRemove(index);
-                        self.clause_manager.deinitClause(cref);
-                        continue :main_loop;
-                    }
-                }
+            //    for (cref.expr) |lit| {
+            //        if (self.value(lit) == .ltrue) {
+            //            self.removeClause(cref);
+            //            _ = self.clause_manager.initial_clauses.swapRemove(index);
+            //            self.clause_manager.deinitClause(cref);
+            //            continue :main_loop;
+            //        }
+            //    }
 
-                index += 1;
-            }
+            //    index += 1;
+            //}
         }
 
         pub fn addLearnedClause(self: *Self, expr: []const Lit, lbd: usize) !ClauseRef {
@@ -516,7 +512,7 @@ pub fn Solver(comptime Nothing: type) type {
                     var num_assign = self.assignation_queue.items.len;
                     try self.lbd_stats.addNumAssign(num_assign);
 
-                    var new_expr = try self.analyse_data.analyze(ClauseRef, self, cref);
+                    var new_expr = try self.analyse_data.analyze(Self, self, cref);
 
                     var lbd = try self.lbd_stats.getLBD(self, new_expr);
                     try self.lbd_stats.append(lbd, new_expr.len);
@@ -560,7 +556,7 @@ pub fn Solver(comptime Nothing: type) type {
 
                     for (assumptions) |lit| {
                         if (self.value(lit) == .lfalse) {
-                            var res = try self.analyse_data.analyzeFinal(ClauseRef, self, lit.not());
+                            var res = try self.analyse_data.analyzeFinal(Self, self.*, lit.not());
                             try self.final_conflict.appendSlice(res);
                             return false;
                         }
