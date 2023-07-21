@@ -121,8 +121,6 @@ pub fn Solver(comptime ProofManager: type) type {
         pub const Proof = ProofManager.ProofType;
         pub const ClauseRef = ClauseManager(Proof).ClauseRef;
 
-        gen_proof: bool = ProofManager.GenProof,
-
         /// set of all the assignation of the solver, usefull for backtracking,
         /// if a literal `lit` is in the assignation queue, and `self.reasonOf(lit.variable()) != null`
         /// then all the negations of the literals in `self.reasonOf(lit.variable()).expr` are
@@ -151,11 +149,17 @@ pub fn Solver(comptime ProofManager: type) type {
         /// an heap for VSIDS heuristic
         vsids: VSIDS,
 
+        /// verbosity level
+        verbose: i32,
+
+        /// unsat core
+        unsat_core: std.ArrayList(Lit),
+
         /// allocator of the solver
         allocator: std.mem.Allocator,
 
         /// if true then the solver state is unsat
-        is_unsat: bool,
+        is_unsat: ?Proof,
 
         /// current decision level of the solver
         level: u32,
@@ -418,7 +422,7 @@ pub fn Solver(comptime ProofManager: type) type {
         pub fn addClause(self: *Self, expr: []Lit) !void {
             try std.testing.expect(self.level == 0);
 
-            if (self.is_unsat) {
+            if (self.is_unsat != null) {
                 // the formula is already unsat
                 return;
             }
@@ -448,14 +452,15 @@ pub fn Solver(comptime ProofManager: type) type {
             proof = try self.proof_manager.initWithLocalState();
 
             if (new_expr.items.len == 0) {
-                self.is_unsat = true;
+                self.is_unsat = proof;
                 return;
             }
 
             if (new_expr.items.len == 1) {
                 try self.mkAssignation(new_expr.items[0], null, proof);
-                if (try self.propagate() != null)
-                    self.is_unsat = true;
+                //if (try self.propagate()) |_| {
+                //    self.is_unsat = true;
+                //}
                 return;
             }
 
@@ -534,21 +539,21 @@ pub fn Solver(comptime ProofManager: type) type {
             }
         }
 
-        pub fn cdcl(self: *Self, assumptions: []const Lit) !bool {
+        pub fn cdcl(self: *Self, assumptions: []const Lit) !?Proof {
+            self.unsat_core.clearRetainingCapacity();
             var restart_conflicts: usize = 0;
 
-            try self.simplify();
-            if (self.is_unsat) return false;
+            if (self.is_unsat) |proof| return proof;
             while (true) {
                 if (try self.propagate()) |cref| {
                     if (self.level == 0) {
-                        if (ProofManager.GenProof) {
-                            var proof = cref.proof;
-                            try self.proof_manager.setExpr(proof);
-                            var expr = self.proof_manager.getExpr(proof).?;
-                            std.debug.print("{}", .{expr.len});
+                        var proof = cref.proof;
+                        try self.proof_manager.setExpr(proof);
+
+                        if (self.proof_manager.getExpr(proof)) |expr| {
+                            std.debug.print("{}\n", .{expr.len});
                         }
-                        return false;
+                        return cref.proof;
                     }
 
                     self.stats.addConflict();
@@ -557,7 +562,7 @@ pub fn Solver(comptime ProofManager: type) type {
                     var num_assign = self.assignation_queue.items.len;
                     try self.lbd_stats.addNumAssign(num_assign);
 
-                    var new_expr = try self.analyse_data.analyze(ClauseRef, self, cref);
+                    var new_expr = try self.analyse_data.analyze(Self, self, cref);
                     var proof = try self.proof_manager.initWithLocalState();
 
                     var lbd = try self.lbd_stats.getLBD(self, new_expr);
@@ -602,9 +607,10 @@ pub fn Solver(comptime ProofManager: type) type {
 
                     for (assumptions) |lit| {
                         if (self.value(lit) == .lfalse) {
-                            var expr = try self.analyse_data.analyzeFinal(ClauseRef, self, lit.not());
-                            std.debug.print("{}\n", .{expr.len});
-                            return false;
+                            var expr = try self.analyse_data.analyzeFinal(Self, self, lit.not());
+                            var proof = try self.proof_manager.initWithLocalState();
+                            try self.unsat_core.appendSlice(expr);
+                            return proof;
                         }
 
                         if (self.value(lit) == .lundef) {
@@ -614,7 +620,7 @@ pub fn Solver(comptime ProofManager: type) type {
                     }
 
                     if (decision == null)
-                        decision = self.vsids.mkDecision() orelse return true;
+                        decision = self.vsids.mkDecision() orelse return null;
                     self.level += 1;
 
                     try self.mkAssignation(decision.?, null, null);
@@ -670,14 +676,16 @@ pub fn Solver(comptime ProofManager: type) type {
             self.propagation_queue = std.ArrayList(Lit).init(allocator);
             self.assignation_queue = std.ArrayList(Lit).init(allocator);
             self.variables = std.ArrayList(VarData(Proof)).init(allocator);
+            self.unsat_core = std.ArrayList(Lit).init(allocator);
             self.vsids = VSIDS.init(allocator);
 
             self.analyse_data = Analyzer.init(allocator);
             self.lbd_stats = try LBDstats.init(allocator);
 
             self.allocator = allocator;
-            self.is_unsat = false;
+            self.is_unsat = null;
             self.level = 0;
+            self.verbose = 0;
 
             self.stats = SolverStats.init();
 
@@ -691,9 +699,12 @@ pub fn Solver(comptime ProofManager: type) type {
             try self.proofGC();
 
             try self.clause_manager.garbadgeCollect(factor);
-            std.debug.print("{}  ", .{@floatToInt(usize, self.lbd_stats.mean_size)});
-            std.debug.print("{}  ", .{self.clause_manager.learned_clauses.items.len});
-            self.stats.print(self.progressEstimate());
+
+            if (self.verbose > 0) {
+                std.debug.print("{}  ", .{@floatToInt(usize, self.lbd_stats.mean_size)});
+                std.debug.print("{}  ", .{self.clause_manager.learned_clauses.items.len});
+                self.stats.print(self.progressEstimate());
+            }
 
             for (self.variables.items) |*var_data| {
                 var i: usize = 0;
@@ -739,6 +750,7 @@ pub fn Solver(comptime ProofManager: type) type {
             self.assignation_queue.deinit();
             self.proof_manager.deinit();
             self.analyse_data.deinit();
+            self.unsat_core.deinit();
             self.lbd_stats.deinit();
             self.vsids.deinit();
 
@@ -936,6 +948,7 @@ test "random clause manager test" {
         if (entry.kind == .File) {
             var solver = try Solver(ProofManager).init(allocator);
             defer solver.deinit();
+            solver.verbose = 1;
 
             const file_path =
                 try std.fmt.allocPrint(allocator, "tests_competition/{s}", .{entry.name});
@@ -956,23 +969,16 @@ test "random clause manager test" {
 
             try solver.parse(buffer);
 
-            var skip_file = false;
-            for ("sudoku.cnf") |c, i| {
-                if (i >= entry.name.len or entry.name[i] != c) {
-                    skip_file = true;
-                    break;
-                }
-            }
-
-            //if (!skip_file) continue;
-
             const assumptions: [0]Lit = undefined;
 
             var b = try solver.cdcl(assumptions[0..]);
-            if (b) try std.testing.expect(solver.checkModel());
-            std.debug.print("{}\n", .{b});
 
-            if (!b) {
+            std.debug.print("{}\n", .{b == null});
+            if (b == null) {
+                try std.testing.expect(solver.checkModel());
+            }
+
+            if (b != null) {
                 const result = try std.ChildProcess.exec(.{
                     .allocator = std.heap.page_allocator,
                     .argv = &[_][]const u8{

@@ -596,7 +596,7 @@ plt.plot(np.sort(benchmark(
 plt.plot(np.sort(benchmark(
     ['../mathsat', '-input=dimacs', 'test.cnf'])), label="mathsat")
 plt.plot(np.sort(benchmark(
-    ['../minisat', 'test.cnf', '-ccmin-mode=1', '-phase-saving=2', '-no-luby'])), label="minisat")
+    ['minisat', 'test.cnf', '-no-pre', '-ccmin-mode=1', '-phase-saving=2', '-no-luby'])), label="minisat")
 #plt.plot(np.sort(benchmark(
 #    ['../glucose_static', 'test.cnf', '-ccmin-mode=1', '-phase-saving=2'])), label="glucose2")
 plt.plot(np.sort(benchmark(

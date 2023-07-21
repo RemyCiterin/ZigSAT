@@ -43,9 +43,10 @@ pub fn main() !void {
 
     try solver.parse(buffer);
 
+    solver.verbose = 1;
     const assumptions: [0]Lit = undefined;
     var b = try solver.cdcl(assumptions[0..]);
     solver.stats.print(solver.progressEstimate());
-    if (b) try std.testing.expect(solver.checkModel());
-    std.debug.print("{}\n", .{b});
+    if (b == null) try std.testing.expect(solver.checkModel());
+    std.debug.print("{}\n", .{b == null});
 }

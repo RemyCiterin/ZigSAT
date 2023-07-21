@@ -31,7 +31,7 @@ pub fn deinit(self: *Self) void {
     self.int_map.deinit();
 }
 
-pub fn analyze(self: *Self, comptime ClauseRef: type, context: anytype, cref: ClauseRef) ![]const Lit {
+pub fn analyze(self: *Self, comptime Context: type, context: *Context, cref: Context.ClauseRef) ![]const Lit {
     self.clear();
 
     context.proof_manager.setBase(cref.proof);
@@ -43,7 +43,7 @@ pub fn analyze(self: *Self, comptime ClauseRef: type, context: anytype, cref: Cl
 
     var IP_counter: usize = 0; // number of implication points of the current clause
     var index = context.assignation_queue.items.len - 1;
-    var clause: ?ClauseRef = cref;
+    var clause: ?Context.ClauseRef = cref;
     var pivot: ?Lit = null;
 
     while (true) {
@@ -85,53 +85,8 @@ pub fn analyze(self: *Self, comptime ClauseRef: type, context: anytype, cref: Cl
         try context.proof_manager.pushStep(pivot.?.variable(), clause.?.proof);
     }
 
-    //const sortFn = struct {
-    //    fn lessThan(ctx: @TypeOf(context), l1: Lit, l2: Lit) bool {
-    //        return ctx.positionOf(l1.variable()) < ctx.positionOf(l2.variable());
-    //    }
-    //};
-
-    //std.sort.sort(Lit, self.result.items[1..], context, sortFn.lessThan);
-
-    //var seen: usize = self.result.items.len - 1;
-
-    //minimize_loop: while (seen > 0) {
-    //    while (!self.int_map.inMap(context.assignation_queue.items[index].variable())) : (index -= 1) {}
-    //    seen -= 1;
-
-    //    var lit = context.assignation_queue.items[index];
-
-    //    if (!self.int_map.get(lit.variable())) {
-    //        index -= 1;
-    //        continue;
-    //    }
-
-    //    var reason = context.reasonOf(lit.variable()) orelse {
-    //        index -= 1;
-    //        continue;
-    //    };
-
-    //    for (reason.expr) |l| {
-    //        if (!self.int_map.inMap(l.variable())) {
-    //            index -= 1;
-    //            continue :minimize_loop;
-    //        }
-    //    }
-
-    //    try self.int_map.insert(lit.variable(), false);
-    //    try context.proof_manager.pushStep(lit.variable(), reason.proof);
-    //}
-
-    //index = 1;
-    //while (index < self.result.items.len) {
-    //    if (!self.int_map.get(self.result.items[index].variable())) {
-    //        _ = self.result.swapRemove(index);
-    //    } else {
-    //        index += 1;
-    //    }
-    //}
-
-    if (!context.gen_proof) {
+    if (Context.Proof == void) {
+        // no proof generation
         index = 1;
         minimize_loop: while (index < self.result.items.len) {
             var v = self.result.items[index].variable();
@@ -155,13 +110,13 @@ pub fn analyze(self: *Self, comptime ClauseRef: type, context: anytype, cref: Cl
     return self.result.items;
 }
 
-pub fn analyzeFinal(self: *Self, comptime ClauseRef: type, context: anytype, lit: Lit) ![]const Lit {
-    _ = ClauseRef;
+pub fn analyzeFinal(self: *Self, comptime Context: type, context: *Context, lit: Lit) ![]const Lit {
     self.clear();
 
     try self.result.append(lit);
 
-    if (context.level == 0) {
+    if (context.levelOf(lit.variable()) == 0) {
+        context.proof_manager.setBase(context.proofOf(lit.variable()));
         return self.result.items;
     }
 
@@ -178,6 +133,7 @@ pub fn analyzeFinal(self: *Self, comptime ClauseRef: type, context: anytype, lit
 
         if (self.int_map.inMap(v)) {
             if (context.reasonOf(v)) |cref| {
+                try context.proof_manager.pushStep(v, cref.proof);
                 for (cref.expr) |x| {
                     if (context.levelOf(x.variable()) > 0)
                         try self.int_map.insert(x.variable(), true);
@@ -191,4 +147,11 @@ pub fn analyzeFinal(self: *Self, comptime ClauseRef: type, context: anytype, lit
     }
 
     return self.result.items;
+}
+
+/// remove all the variables of level 0 of a proof
+pub fn finalizeProof(self: *Self, comptime Context: type, context: *Context, expr: []const Lit) !void {
+    _ = self;
+    _ = context;
+    _ = expr;
 }

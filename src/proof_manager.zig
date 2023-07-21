@@ -63,6 +63,8 @@ pub const Proof = union(enum) {
     }
 };
 
+pub const Root = @This();
+
 pub const ProofRef = *Proof;
 
 /// this proof manager is the internal proof manager of the solver
@@ -89,14 +91,27 @@ pub const ProofManager = struct {
     /// set of resolution steps used to resolve the current base
     local_steps: std.ArrayList(Resolution.ResStep),
 
-    /// data structure used to apply the resolutions
     local_expr: std.ArrayList(Lit),
-
     copy_expr: std.ArrayList(Lit),
 
     const Self = @This();
     pub const ProofType = ProofRef;
-    pub const GenProof = true;
+
+    pub const ProofChecker = struct {
+        context: Self,
+
+        pub fn getExpr(self: *@This(), proof: ProofRef) ?[]const Lit {
+            return self.context.getExpr(proof);
+        }
+
+        pub fn setExpr(self: *@This(), proof: ProofRef) !void {
+            return try self.context.setExpr(proof);
+        }
+    };
+
+    pub fn proofChecker(self: *Self) Self.ProofChecker {
+        return .{ .context = self };
+    }
 
     pub fn getExpr(self: *Self, proof: ProofRef) ?[]const Lit {
         _ = self;
@@ -165,8 +180,8 @@ pub const ProofManager = struct {
     }
 
     pub fn clear(self: *Self) void {
-        self.local_base = null;
         self.local_steps.clearRetainingCapacity();
+        self.local_base = null;
     }
 
     pub fn pushStep(self: *Self, variable: Variable, proof: ProofRef) !void {
@@ -319,13 +334,19 @@ pub const ProofManager = struct {
 
 pub const EmptyProofManager = struct {
     pub const ProofType = void;
-    pub const GenProof = false;
 
-    const Self = @This();
-
-    pub fn clear(self: *Self) void {
+    pub fn setExpr(self: *@This(), proof: void) !void {
+        _ = proof;
         _ = self;
     }
+
+    pub fn getExpr(self: *@This(), proof: void) ?[]const Lit {
+        _ = proof;
+        _ = self;
+        return null;
+    }
+
+    const Self = @This();
 
     pub fn pushStep(self: *Self, v: Variable, proof: ProofType) !void {
         _ = proof;
