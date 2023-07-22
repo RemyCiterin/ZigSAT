@@ -43,13 +43,13 @@ pub fn IntMap(comptime T: type, comptime V: type, comptime to_usize: anytype) ty
             self.queue_inverse.items[to_usize(self.queue.items[y])] = y;
         }
 
-        pub fn inMap(self: Self, x: T) bool {
+        pub fn contain(self: Self, x: T) bool {
             return to_usize(x) < self.queue_inverse.items.len and
                 self.queue_inverse.items[to_usize(x)] != null;
         }
 
         pub fn insert(self: *Self, x: T, v: V) !void {
-            if (self.inMap(x)) return;
+            if (self.contain(x)) return;
 
             while (self.queue_inverse.items.len <= to_usize(x)) {
                 try self.queue_inverse.append(null);
@@ -62,7 +62,7 @@ pub fn IntMap(comptime T: type, comptime V: type, comptime to_usize: anytype) ty
         }
 
         pub fn remove(self: *Self, x: T) void {
-            if (!self.inMap(x)) return;
+            if (!self.contain(x)) return;
 
             var end = self.queue.items.len - 1;
             self.swap(end, self.queue_inverse.items[to_usize(x)] orelse unreachable);
@@ -116,7 +116,7 @@ test "random int_map test: test all interface functions" {
 
         while (i > 100) : (i -= 1) {
             var x = rnd.random().int(u32) % 1000;
-            if (int_map.inMap(x)) {
+            if (int_map.contain(x)) {
                 int_map.getMut(x).* = 42;
                 try std.testing.expect(int_map.get(x) == 42);
                 int_map.remove(x);

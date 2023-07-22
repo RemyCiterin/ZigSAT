@@ -36,13 +36,13 @@ pub fn IntSet(comptime T: type, comptime to_usize: anytype) type {
             self.queue_inverse.items[to_usize(self.queue.items[y])] = y;
         }
 
-        pub fn inSet(self: Self, x: T) bool {
+        pub fn contain(self: Self, x: T) bool {
             return to_usize(x) < self.queue_inverse.items.len and
                 self.queue_inverse.items[to_usize(x)] != null;
         }
 
         pub fn insert(self: *Self, x: T) !void {
-            if (self.inSet(x)) return;
+            if (self.contain(x)) return;
 
             while (self.queue_inverse.items.len <= to_usize(x)) {
                 try self.queue_inverse.append(null);
@@ -53,7 +53,7 @@ pub fn IntSet(comptime T: type, comptime to_usize: anytype) type {
         }
 
         pub fn remove(self: *Self, x: T) void {
-            if (!self.inSet(x)) return;
+            if (!self.contain(x)) return;
 
             var end = self.queue.items.len - 1;
             self.swap(end, self.queue_inverse.items[to_usize(x)] orelse unreachable);
@@ -91,7 +91,7 @@ test "random int_set test: test all interface functions" {
 
         while (i > 100) : (i -= 1) {
             var x = rnd.random().int(u32) % 1000;
-            if (int_set.inSet(x)) int_set.remove(x);
+            if (int_set.contain(x)) int_set.remove(x);
         }
 
         int_set.clear();

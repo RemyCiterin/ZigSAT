@@ -36,7 +36,7 @@ pub fn deinit(self: *Self) void {
 pub fn addVariable(self: *Self) !void {
     var v = @truncate(Variable, self.activity.items.len);
     try self.heap.insert(v, 0.0);
-    try self.polarity.append(true);
+    try self.polarity.append(false);
     try self.activity.append(0.0);
 }
 

@@ -2,139 +2,87 @@
 const std = @import("std");
 const Lit = @import("lit.zig").Lit;
 const lbool = @import("lit.zig").lbool;
+const Variable = @import("lit.zig").Variable;
 
-/// a type of reader with the possibility to backtrack
-const Input = struct {
-    buffer: []const u8,
-    index: usize = 0,
-    line: usize = 1,
-    col: usize = 1,
+pub fn parseDIMACS(allocator: std.mem.Allocator, text: []u8, output: *std.ArrayList([]Lit)) !usize {
+    var index: usize = 0;
 
-    const Self = @This();
+    var max_variable: usize = 0;
 
-    pub fn read(self: Self, len: usize) []const u8 {
-        var max_index = std.math.min(self.index + len, self.buffer.len);
-        return self.buffer[self.index..max_index];
-    }
+    const IntParser = struct {
+        index: usize,
+        text: []u8,
 
-    pub fn next(self: Self) Result(u8) {
-        if (self.index >= self.buffer.len)
-            return null;
+        fn parseInternal(state: *@This(), x: i64) ?i64 {
+            if (state.index >= state.text.len) return x;
+            var char = state.text[state.index];
 
-        var char = self.buffer[self.index];
-        var out = Self{ .buffer = self.buffer, .index = self.index };
-
-        if (char == '\n') {
-            out.line = self.line + 1;
-            out.col = 0;
-        } else {
-            out.line = self.line;
-            out.col = self.col + 1;
+            switch (char) {
+                '0'...'9' => {
+                    var y = char - '0';
+                    state.index += 1;
+                    return state.parseInternal(x * 10 + y);
+                },
+                ' ', '\n', '\t' => return x,
+                else => return null,
+            }
         }
 
-        return .{ .next_input = out, .result = self.buffer[self.index] };
-    }
-};
-
-pub fn Result(comptime T: type) type {
-    return ?struct {
-        next_input: Input,
-        result: T,
-    };
-}
-
-pub fn Parser(comptime Context: type, comptime Err: type, comptime T: type) type {
-    return struct {
-        context: Context,
-        _parse: *const fn (Context, Input) Err!Result(T),
-
-        pub const Error = Err;
-        const Self = @This();
-
-        pub fn parse(self: Self, input: Input) Err!Result(T) {
-            return self._parse(self.context, input);
+        fn parse(state: *@This()) ?i64 {
+            if (state.index >= state.text.len) return null;
+            switch (state.text[state.index]) {
+                '0'...'9' => return state.parseInternal(0),
+                '-' => {
+                    state.index += 1;
+                    var x = state.parse() orelse return null;
+                    return -x;
+                },
+                else => return null,
+            }
         }
     };
-}
 
-pub const CharParser = struct {
-    const Self = @This();
-    char: u8,
+    var expr = std.ArrayList(Lit).init(allocator);
+    defer expr.deinit();
 
-    pub fn parse(self: Self, input: Input) error{}!Result(u8) {
-        if (input.next()) |res| {
-            if (res.result == self.char)
-                return res;
+    while (index < text.len) {
+        if (text[index] == ' ' or text[index] == '\t' or text[index] == '\n') {
+            index += 1;
+            continue;
         }
-        return null;
-    }
 
-    pub fn init(char: u8) Self {
-        return Self{ .char = char };
-    }
-
-    const ParserType = Parser(Self, error{}, u8);
-
-    pub fn parser(self: Self) ParserType {
-        return ParserType{ .context = self, ._parse = parse };
-    }
-};
-
-pub fn IntParser(comptime T: type, comptime base: T) type {
-    if (base <= 1) @compileError("base should be greater than one");
-
-    return struct {
-        const bits = switch (@typeInfo(T)) {
-            .Int => |info| info.bits,
-            else => @compileError("only runtime integer accepted"),
-        };
-
-        const signedness = switch (@typeInfo(T)) {
-            .Int => |info| info.signedness,
-            else => @compileError("only runtime integer accepted"),
-        };
-
-        const Self = @This();
-        begin: usize,
-        end: usize,
-
-        /// assume that buffer[self.begin..self.end] is an
-        /// integer and parse it, return null if this integer is too large
-        pub fn parseInt(self: Self, buffer: []const u8) ?T {
-            var idx: usize = self.end - 1;
-            var power: T = 1;
-            var out: T = 0;
-
-            while (idx >= self.begin) : (idx -= 1) {
-                var x: T = undefined;
-
-                if (@mulWithOverflow(T, buffer[idx], power, &x))
-                    return null;
-
-                if (@addWithOverflow(T, x, out, &out))
-                    return null;
-
-                if (idx != self.begin)
-                    if (@mulWithOverflow(T, power, base, &power))
-                        return null;
+        // parse comment
+        if (text[index] == 'c' or text[index] == 'p') {
+            while (index < text.len and text[index] != '\n')
+                index += 1;
+            continue;
+        }
+        // parse clause
+        while (index < text.len) {
+            if (text[index] == ' ' or text[index] == '\n' or text[index] == '\t') {
+                index += 1;
+                continue;
             }
 
-            return out;
+            var p = IntParser{ .index = index, .text = text };
+            var lit = p.parse() orelse unreachable;
+            index = p.index;
+
+            if (lit == 0) break;
+
+            var variable = @intCast(usize, if (lit > 0) lit else -lit);
+
+            if (variable > max_variable)
+                max_variable = variable;
+
+            try expr.append(Lit.init(@intCast(Variable, variable), lit > 0));
         }
 
-        pub fn parseInternal(self: *Self, input: Input) error{}!Result(T) {
-            _ = self;
-            _ = input;
-            @panic("");
-        }
-    };
-}
+        var expr_copy = try allocator.alloc(Lit, expr.items.len);
+        std.mem.copy(Lit, expr_copy, expr.items);
+        expr.clearRetainingCapacity();
+        try output.append(expr_copy);
+    }
 
-test "parser test" {
-    const input = Input{ .buffer = "b" };
-
-    var parser = CharParser.init('b').parser();
-
-    var res = try parser.parse(input);
-    try std.testing.expect(res.?.result == 'b');
+    return max_variable;
 }

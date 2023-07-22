@@ -60,7 +60,7 @@ pub fn analyze(self: *Self, comptime Context: type, context: *Context, cref: Con
         for (clause.?.expr) |lit| {
             if (pivot != null and pivot.?.equals(lit)) continue;
 
-            if (!self.int_map.inMap(lit.variable()) and context.levelOf(lit.variable()) > 0) {
+            if (!self.int_map.contain(lit.variable()) and context.levelOf(lit.variable()) > 0) {
                 try context.vsids.incrActivity(lit.variable());
 
                 if (context.levelOf(lit.variable()) < context.level) {
@@ -73,7 +73,7 @@ pub fn analyze(self: *Self, comptime Context: type, context: *Context, cref: Con
             }
         }
 
-        while (!self.int_map.inMap(context.assignation_queue.items[index].variable())) : (index -= 1) {}
+        while (!self.int_map.contain(context.assignation_queue.items[index].variable())) : (index -= 1) {}
         pivot = context.assignation_queue.items[index];
         clause = context.reasonOf(pivot.?.variable());
         self.int_map.remove(pivot.?.variable());
@@ -97,7 +97,7 @@ pub fn analyze(self: *Self, comptime Context: type, context: *Context, cref: Con
             };
 
             for (reason.expr) |l| {
-                if (!self.int_map.inMap(l.variable())) {
+                if (!self.int_map.contain(l.variable())) {
                     index += 1;
                     continue :minimize_loop;
                 }
@@ -131,7 +131,7 @@ pub fn analyzeFinal(self: *Self, comptime Context: type, context: *Context, lit:
         if (context.levelOf(v) == 0)
             break;
 
-        if (self.int_map.inMap(v)) {
+        if (self.int_map.contain(v)) {
             if (context.reasonOf(v)) |cref| {
                 try context.proof_manager.pushStep(v, cref.proof);
                 for (cref.expr) |x| {

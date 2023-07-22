@@ -544,7 +544,7 @@ def benchmark(prog):
         busy[index] = False
         print(time.time()-t)
 
-    for _ in range(30):
+    for _ in range(25):
         #grid = gen_grid(5, 250)
         #constraint = add_sudoku(grid)
 
@@ -590,17 +590,20 @@ def benchmark(prog):
 
 
 plt.plot(np.sort(benchmark(
-    ['kissat', 'test.cnf'])), label='kissat')
+    ['kissat', 'test.cnf'])), '-b', label='kissat')
 plt.plot(np.sort(benchmark(
-    ['../zig-out/bin/ZigSAT', 'test.cnf'])), label="ZigSAT")
+    ['../zig-out/bin/ZigSAT', 'test.cnf'])), '-r', label="ZigSAT")
 plt.plot(np.sort(benchmark(
-    ['../mathsat', '-input=dimacs', 'test.cnf'])), label="mathsat")
+    ['../mathsat', '-input=dimacs', '-proof_generation=true', 'test.cnf'])), '-k', label="mathsat with proof")
 plt.plot(np.sort(benchmark(
-    ['minisat', 'test.cnf', '-no-pre', '-ccmin-mode=1', '-phase-saving=2', '-no-luby'])), label="minisat")
+    ['../mathsat', '-input=dimacs', 'test.cnf'])), '--k', label="mathsat")
+plt.plot(np.sort(benchmark(
+    ['minisat', 'test.cnf', '-no-pre', '-ccmin-mode=1', '-phase-saving=2', '-no-luby'])),
+    '-g', label="minisat")
 #plt.plot(np.sort(benchmark(
 #    ['../glucose_static', 'test.cnf', '-ccmin-mode=1', '-phase-saving=2'])), label="glucose2")
 plt.plot(np.sort(benchmark(
-    ['glucose', 'test.cnf', '-no-pre', '-ccmin-mode=1', '-phase-saving=2'])), label="glucose4")
+    ['glucose', 'test.cnf', '-no-pre', '-ccmin-mode=1', '-phase-saving=2'])), '--g', label="glucose4")
 plt.yscale("log")
 plt.legend()
 plt.show()

@@ -199,38 +199,6 @@ pub fn Solver(comptime ProofManager: type) type {
             return true;
         }
 
-        pub fn checkWatchersState(self: *Self) !void {
-            for (self.variables.items) |var_data, variable| {
-                var v = @intCast(Variable, variable);
-
-                for (var_data.pos_watchers.items) |w| {
-                    try std.testing.expect(w.cref.expr[0].equals(Lit.init(v, true)) or
-                        w.cref.expr[1].equals(Lit.init(v, true)));
-                }
-
-                for (var_data.neg_watchers.items) |w| {
-                    try std.testing.expect(w.cref.expr[0].equals(Lit.init(v, false)) or
-                        w.cref.expr[1].equals(Lit.init(v, false)));
-                }
-            }
-        }
-
-        pub fn checkPropagateComplete(self: *Self) !void {
-            c_loop: for (self.clause_manager.initial_clauses.items) |cref| {
-                var count: usize = 0;
-
-                for (cref.expr) |lit| {
-                    switch (self.value(lit)) {
-                        .ltrue => continue :c_loop,
-                        .lundef => count += 1,
-                        .lfalse => {},
-                    }
-                }
-
-                try std.testing.expect(count >= 2);
-            }
-        }
-
         pub fn propagate(self: *Self) !?ClauseRef {
             while (self.propagation_queue.items.len > 0) {
                 self.stats.addPropagation();
@@ -275,11 +243,6 @@ pub fn Solver(comptime ProofManager: type) type {
 
                 var k: usize = 2;
                 while (k < cref.expr.len) : (k += 1) {
-                    //if (self.value(cref.expr[k]) == .ltrue) {
-                    //    i += 1;
-                    //    continue :watchers_loop;
-                    //}
-
                     if (self.value(cref.expr[k]) != .lfalse) {
                         std.mem.swap(Lit, &cref.expr[k], &cref.expr[1]);
                         try self.getLitWatchers(cref.expr[1])
@@ -292,18 +255,9 @@ pub fn Solver(comptime ProofManager: type) type {
 
                 // did not find a new literal to watch:
                 if (self.value(cref.expr[0]) == .lfalse) {
-                    //for (cref.expr) |l|
-                    //    try std.testing.expect(self.value(l) == .lfalse);
-
                     self.propagation_queue.clearRetainingCapacity();
                     return cref;
                 }
-
-                //try std.testing.expect(self.value(cref.expr[0]) == .lundef);
-                //for (cref.expr) |l, index| {
-                //    if (index != 0)
-                //        try std.testing.expect(self.value(l) == .lfalse);
-                //}
 
                 var proof: ?Proof = null;
 
@@ -458,9 +412,6 @@ pub fn Solver(comptime ProofManager: type) type {
 
             if (new_expr.items.len == 1) {
                 try self.mkAssignation(new_expr.items[0], null, proof);
-                //if (try self.propagate()) |_| {
-                //    self.is_unsat = true;
-                //}
                 return;
             }
 
@@ -479,10 +430,10 @@ pub fn Solver(comptime ProofManager: type) type {
             try std.testing.expect(proof != null or self.level != 0);
             try std.testing.expect(proof == null or self.level == 0);
 
-            if (cref) |clause|
-                for (clause.expr) |l|
-                    if (l.variable() != lit.variable())
-                        try std.testing.expect(self.value(l) == .lfalse);
+            //if (cref) |clause|
+            //    for (clause.expr) |l|
+            //        if (l.variable() != lit.variable())
+            //            try std.testing.expect(self.value(l) == .lfalse);
 
             try std.testing.expect(self.value(lit) == .lundef);
 
@@ -547,12 +498,12 @@ pub fn Solver(comptime ProofManager: type) type {
             while (true) {
                 if (try self.propagate()) |cref| {
                     if (self.level == 0) {
-                        var proof = cref.proof;
-                        try self.proof_manager.setExpr(proof);
+                        //var proof = cref.proof;
+                        //try self.proof_manager.setExpr(proof);
 
-                        if (self.proof_manager.getExpr(proof)) |expr| {
-                            std.debug.print("{}\n", .{expr.len});
-                        }
+                        //if (self.proof_manager.getExpr(proof)) |expr| {
+                        //    std.debug.print("{}\n", .{expr.len});
+                        //}
                         return cref.proof;
                     }
 
@@ -786,106 +737,6 @@ pub fn Solver(comptime ProofManager: type) type {
             return new_var;
         }
 
-        pub fn printDIMACS(self: *Self) void {
-            const num_v = self.variables.items.len;
-            const num_c = self.clause_manager.initial_clauses.items.len;
-
-            std.debug.print("p {} {}\n", .{ num_v - 1, num_c });
-
-            for (self.clause_manager.initial_clauses.items) |cref| {
-                for (cref.expr) |lit| {
-                    var v: i64 = @as(i64, lit.variable());
-                    if (v == 0) continue;
-                    if (lit.sign()) {
-                        std.debug.print("{} ", .{v});
-                    } else {
-                        std.debug.print("-{} ", .{v});
-                    }
-                }
-                std.debug.print("0\n", .{});
-            }
-        }
-
-        pub fn parse(self: *Self, text: []u8) !void {
-            var index: usize = 0;
-
-            const IntParser = struct {
-                index: usize,
-                text: []u8,
-
-                fn parseInternal(state: *@This(), x: i64) ?i64 {
-                    if (state.index >= state.text.len) return x;
-                    var char = state.text[state.index];
-
-                    switch (char) {
-                        '0'...'9' => {
-                            var y = char - '0';
-                            state.index += 1;
-                            return state.parseInternal(x * 10 + y);
-                        },
-                        ' ', '\n', '\t' => return x,
-                        else => return null,
-                    }
-                }
-
-                fn parse(state: *@This()) ?i64 {
-                    if (state.index >= state.text.len) return null;
-                    switch (state.text[state.index]) {
-                        '0'...'9' => return state.parseInternal(0),
-                        '-' => {
-                            state.index += 1;
-                            var x = state.parse() orelse return null;
-                            return -x;
-                        },
-                        else => return null,
-                    }
-                }
-            };
-
-            var expr = std.ArrayList(Lit).init(self.allocator);
-            defer expr.deinit();
-
-            while (index < text.len) {
-                if (text[index] == ' ' or text[index] == '\t' or text[index] == '\n') {
-                    index += 1;
-                    continue;
-                }
-
-                // parse comment
-                if (text[index] == 'c' or text[index] == 'p') {
-                    while (index < text.len and text[index] != '\n')
-                        index += 1;
-                    continue;
-                }
-                // parse clause
-                while (index < text.len) {
-                    if (text[index] == ' ' or text[index] == '\n' or text[index] == '\t') {
-                        index += 1;
-                        continue;
-                    }
-
-                    var p = IntParser{ .index = index, .text = text };
-                    var lit = p.parse() orelse unreachable;
-                    index = p.index;
-
-                    if (lit == 0) break;
-
-                    var variable = if (lit > 0) lit else -lit;
-
-                    while (self.variables.items.len <= variable) {
-                        _ = try self.addVariable();
-                    }
-
-                    try expr.append(Lit.init(@intCast(Variable, variable), lit > 0));
-                }
-
-                try self.addClause(expr.items);
-                expr.clearRetainingCapacity();
-            }
-
-            return;
-        }
-
         pub fn proofGC(self: *Self) !void {
             for (self.variables.items) |var_data| {
                 if (var_data.state) |state| {
@@ -924,70 +775,4 @@ pub fn Solver(comptime ProofManager: type) type {
             self.proof_manager.applyGC();
         }
     };
-}
-test "random clause manager test" {
-    //var rnd = std.rand.DefaultPrng.init(0);
-    const ProofManager = @import("proof_manager.zig").EmptyProofManager;
-
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-    defer {
-        _ = gpa.deinit();
-    }
-
-    var expr = std.ArrayList(Lit).init(allocator);
-    defer expr.deinit();
-
-    const iter_dir = try std.fs.cwd().openIterableDir("tests_competition", .{});
-    std.debug.print("\n", .{});
-
-    var iter = iter_dir.iterate();
-    var index: usize = 0;
-
-    while (try iter.next()) |entry| : (index += 1) {
-        if (entry.kind == .File) {
-            var solver = try Solver(ProofManager).init(allocator);
-            defer solver.deinit();
-            solver.verbose = 1;
-
-            const file_path =
-                try std.fmt.allocPrint(allocator, "tests_competition/{s}", .{entry.name});
-            std.debug.print("{s}\n", .{file_path});
-            defer allocator.free(file_path);
-
-            const file = try std.fs.cwd().openFile(file_path, .{});
-            defer file.close();
-
-            const file_size = try file.getEndPos();
-
-            var buffer = try allocator.alloc(u8, file_size);
-            defer allocator.free(buffer);
-
-            var bytes_read = try file.read(buffer);
-
-            try std.testing.expect(bytes_read == buffer.len);
-
-            try solver.parse(buffer);
-
-            const assumptions: [0]Lit = undefined;
-
-            var b = try solver.cdcl(assumptions[0..]);
-
-            std.debug.print("{}\n", .{b == null});
-            if (b == null) {
-                try std.testing.expect(solver.checkModel());
-            }
-
-            if (b != null) {
-                const result = try std.ChildProcess.exec(.{
-                    .allocator = std.heap.page_allocator,
-                    .argv = &[_][]const u8{
-                        "z3",
-                        file_path,
-                    },
-                });
-                std.debug.print("{s}\n", .{result.stdout});
-            }
-        }
-    }
 }
