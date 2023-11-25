@@ -48,11 +48,11 @@ pub const lbool = enum(u8) {
     }
 
     pub fn toInt(self: lbool) u8 {
-        return @enumToInt(self);
+        return @intFromEnum(self);
     }
 
     pub fn fromInt(x: u8) lbool {
-        return @intToEnum(lbool, x);
+        return @enumFromInt(x);
     }
 };
 
@@ -71,7 +71,7 @@ pub const LitTag = enum(u1) { pos, neg };
 pub const Variable = u31;
 
 pub fn variableToUsize(v: Variable) usize {
-    return @intCast(usize, v);
+    return @intCast(v);
 }
 
 pub const Lit = union(LitTag) {
@@ -122,14 +122,14 @@ pub const Lit = union(LitTag) {
             },
         }
 
-        return (@intCast(u32, x) << 1) | @enumToInt(@as(LitTag, self));
+        return (@as(u32, x) << 1) | @intFromEnum(@as(LitTag, self));
     }
 
     pub fn fromInt(x: u32) LitError!Self {
-        var tag = @intToEnum(LitTag, @truncate(u1, x));
+        var tag: LitTag = @enumFromInt(@as(u1, @truncate(x)));
         switch (tag) {
-            .pos => return Lit{ .pos = @intCast(u31, x >> 1) },
-            .neg => return Lit{ .neg = @intCast(u31, x >> 1) },
+            .pos => return Lit{ .pos = @as(u31, @intCast(x >> 1)) },
+            .neg => return Lit{ .neg = @as(u31, @intCast(x >> 1)) },
         }
     }
 };
@@ -152,7 +152,7 @@ pub fn generateClause(new_expr: *std.ArrayList(Lit), expr: []Lit) !bool {
 
     new_expr.clearRetainingCapacity();
 
-    std.sort.sort(Lit, expr, {}, sortFn.lessThan);
+    std.mem.sort(Lit, expr, {}, sortFn.lessThan);
 
     var l: ?Lit = null;
     for (expr) |lit| {

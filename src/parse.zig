@@ -13,7 +13,7 @@ const Input = struct {
     const Self = @This();
 
     pub fn read(self: Self, len: usize) []const u8 {
-        var max_index = std.math.min(self.index + len, self.buffer.len);
+        var max_index = @min(self.index + len, self.buffer.len);
         return self.buffer[self.index..max_index];
     }
 
@@ -80,6 +80,18 @@ pub const CharParser = struct {
     }
 };
 
+fn mulWithOverflow(comptime T: type, a: T, b: T, res: *T) bool {
+    var out = @mulWithOverflow(a, b);
+    res.* = out[0];
+    return out[1];
+}
+
+fn addWithOverflow(comptime T: type, a: T, b: T, res: *T) bool {
+    var out = @addWithOverflow(a, b);
+    res.* = out[0];
+    return out[1];
+}
+
 pub fn IntParser(comptime T: type, comptime base: T) type {
     if (base <= 1) @compileError("base should be greater than one");
 
@@ -108,15 +120,16 @@ pub fn IntParser(comptime T: type, comptime base: T) type {
             while (idx >= self.begin) : (idx -= 1) {
                 var x: T = undefined;
 
-                if (@mulWithOverflow(T, buffer[idx], power, &x))
+                if (mulWithOverflow(T, buffer[idx], power, &x))
                     return null;
 
-                if (@addWithOverflow(T, x, out, &out))
+                if (addWithOverflow(T, x, out, &out))
                     return null;
 
-                if (idx != self.begin)
-                    if (@mulWithOverflow(T, power, base, &power))
+                if (idx != self.begin) {
+                    if (mulWithOverflow(T, power, base, &power))
                         return null;
+                }
             }
 
             return out;

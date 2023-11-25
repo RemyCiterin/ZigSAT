@@ -119,14 +119,6 @@ class BoolVar:
     def ite(self, t, e):
         return (~self | t) & (self | e)
 
-    def print_cnf(self):
-        print("p cnf {} {}".format(BoolVar.ident, len(BoolVar.cnf)+1))
-        print("{} 0".format(self.ident))
-        for clause in BoolVar.cnf:
-            for l in clause:
-                print(end = "{} ".format(l))
-            print("0")
-
     def __str__(self):
         s = "p cnf {} {}\n".format(BoolVar.ident, len(BoolVar.cnf)+1)
         s += "{} 0\n".format(self.ident)
@@ -545,11 +537,11 @@ def benchmark(prog):
         print(time.time()-t)
 
     for _ in range(30):
-        grid = gen_grid(5, 250)
-        constraint = add_sudoku(grid)
+        #grid = gen_grid(5, 250)
+        #constraint = add_sudoku(grid)
 
-        #grid = gen_grid(3, 25)
-        #constraint = Sudoku(grid).constraint
+        grid = gen_grid(3, 25)
+        constraint = Sudoku(grid).constraint
 
         #N = rand(2 ** 20)
         #print(N)
@@ -592,9 +584,9 @@ def benchmark(prog):
 plt.plot(np.sort(benchmark(
     ['kissat', 'test.cnf'])), label='kissat')
 plt.plot(np.sort(benchmark(
-    ['../zig-out/bin/ZigSAT', 'test.cnf'])), label="ZigSAT")
-plt.plot(np.sort(benchmark(
-    ['../mathsat', '-input=dimacs', 'test.cnf'])), label="mathsat")
+    ['../zig-out/bin/ZigSat', 'test.cnf'])), label="ZigSAT")
+#plt.plot(np.sort(benchmark(
+#    ['../mathsat', '-input=dimacs', 'test.cnf'])), label="mathsat")
 plt.plot(np.sort(benchmark(
     ['minisat', 'test.cnf', '-no-pre', '-ccmin-mode=1', '-phase-saving=2', '-no-luby'])), label="minisat")
 #plt.plot(np.sort(benchmark(

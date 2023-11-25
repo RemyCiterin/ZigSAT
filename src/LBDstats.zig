@@ -60,11 +60,11 @@ pub fn addNumAssign(self: *Self, num_assign: usize) !void {
     try self.assign_buffer.append(num_assign);
     self.assign_sum += num_assign;
 
-    const assign_sum = @intToFloat(f64, self.assign_sum);
-    const assign_cap = @intToFloat(f64, self.assign_cap);
+    const assign_sum: f64 = @floatFromInt(self.assign_sum);
+    const assign_cap: f64 = @floatFromInt(self.assign_cap);
 
     if (self.assign_buffer.full())
-        if (@intToFloat(f64, num_assign) > 1.4 * assign_sum / assign_cap)
+        if (@as(f64, @floatFromInt(num_assign)) > 1.4 * assign_sum / assign_cap)
             self.clear();
 }
 
@@ -88,17 +88,17 @@ pub fn append(self: *Self, lbd: usize, size: usize) !void {
 
     self.num_conflicts += 1;
 
-    self.mean_size += 0.01 * (@intToFloat(f64, size) - self.mean_size);
+    self.mean_size += 0.01 * (@as(f64, @floatFromInt(size)) - self.mean_size);
 }
 
 pub fn needRestart(self: Self) bool {
     if (!self.buffer.full())
         return false;
 
-    const st_sum = @intToFloat(f64, self.st_sum);
-    const lt_sum = @intToFloat(f64, self.lt_sum);
-    const cap = @intToFloat(f64, self.cap);
-    const lt_cap = @intToFloat(f64, self.num_conflicts);
+    const st_sum: f64 = @floatFromInt(self.st_sum);
+    const lt_sum: f64 = @floatFromInt(self.lt_sum);
+    const cap: f64 = @floatFromInt(self.cap);
+    const lt_cap: f64 = @floatFromInt(self.num_conflicts);
 
     return st_sum * 0.8 / cap > lt_sum / lt_cap;
 }

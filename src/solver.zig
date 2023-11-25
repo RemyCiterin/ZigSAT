@@ -161,17 +161,17 @@ pub fn Solver(comptime Nothing: type) type {
 
         pub fn progressEstimate(self: *Self) f64 {
             var progress: f64 = 0.0;
-            const F: f64 = 1.0 / @intToFloat(f64, self.variables.items.len);
+            const F: f64 = 1.0 / @as(f64, @floatFromInt(self.variables.items.len));
             var level: usize = 0;
 
             for (self.assignation_queue.items) |l| {
                 if (self.levelOf(l.variable()) != level)
                     level = self.levelOf(l.variable());
 
-                progress += std.math.pow(f64, F, @intToFloat(f64, level));
+                progress += std.math.pow(f64, F, @as(f64, @floatFromInt(level)));
             }
 
-            return progress / @intToFloat(f64, self.variables.items.len);
+            return progress / @as(f64, @floatFromInt(self.variables.items.len));
         }
 
         pub fn checkModel(self: *Self) bool {
@@ -189,8 +189,8 @@ pub fn Solver(comptime Nothing: type) type {
         }
 
         pub fn checkWatchersState(self: *Self) !void {
-            for (self.variables.items) |var_data, variable| {
-                var v = @intCast(Variable, variable);
+            for (self.variables.items, 0..) |var_data, variable| {
+                var v: Variable = @intCast(variable);
 
                 for (var_data.pos_watchers.items) |w| {
                     try std.testing.expect(w.cref.expr[0].equals(Lit.init(v, true)) or
@@ -314,7 +314,7 @@ pub fn Solver(comptime Nothing: type) type {
 
             std.debug.print("assignation queue\n", .{});
             for (self.assignation_queue.items) |lit| {
-                var x: i64 = @intCast(i64, lit.variable());
+                var x: i64 = @intCast(lit.variable());
                 var y = if (lit.sign()) x else -x;
                 std.debug.print("{} ", .{y});
             }
@@ -521,7 +521,7 @@ pub fn Solver(comptime Nothing: type) type {
                     for (new_expr) |lit| {
                         var v = lit.variable();
                         var v_level = self.levelOf(v);
-                        if (v_level < self.level) level = std.math.max(level, v_level);
+                        if (v_level < self.level) level = @max(level, v_level);
                     }
 
                     while (true) {
@@ -647,7 +647,7 @@ pub fn Solver(comptime Nothing: type) type {
             try self.clause_manager.garbadgeCollect(factor);
 
             if (self.verbose >= 1) {
-                std.debug.print("{}  ", .{@floatToInt(usize, self.lbd_stats.mean_size)});
+                std.debug.print("{}  ", .{@as(usize, @intFromFloat(self.lbd_stats.mean_size))});
                 std.debug.print("{}  ", .{self.clause_manager.learned_clauses.items.len});
                 self.stats.print(self.progressEstimate());
             }
@@ -716,7 +716,7 @@ pub fn Solver(comptime Nothing: type) type {
                 return error.TooManyVariables;
             }
 
-            var new_var = @truncate(u31, new_var_usize);
+            var new_var: Variable = @truncate(new_var_usize);
 
             var new_var_data: VarData = undefined;
             new_var_data.state = null;
@@ -821,7 +821,7 @@ pub fn Solver(comptime Nothing: type) type {
                         _ = try self.addVariable();
                     }
 
-                    try expr.append(Lit.init(@intCast(Variable, variable), lit > 0));
+                    try expr.append(Lit.init(@intCast(variable), lit > 0));
                 }
 
                 try self.addClause(expr.items);
@@ -876,7 +876,7 @@ test "random clause manager test" {
             try solver.parse(buffer);
 
             var skip_file = false;
-            for ("sudoku.cnf") |c, i| {
+            for ("sudoku.cnf", 0..) |c, i| {
                 if (i >= entry.name.len or entry.name[i] != c) {
                     skip_file = true;
                     break;

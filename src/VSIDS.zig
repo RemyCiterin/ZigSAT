@@ -34,7 +34,7 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn addVariable(self: *Self) !void {
-    var v = @truncate(Variable, self.activity.items.len);
+    var v: Variable = @truncate(self.activity.items.len);
     try self.heap.insert(v, 0.0);
     try self.polarity.append(true);
     try self.activity.append(0.0);
@@ -71,9 +71,9 @@ pub fn incrActivity(self: *Self, v: Variable) !void {
         try self.heap.insert(v, -act);
 
     if (act > 1e100) {
-        for (self.activity.items) |*a, i| {
-            if (self.heap.inHeap(@truncate(Variable, i)))
-                try self.heap.insert(@truncate(Variable, i), -a.* * 1e-100);
+        for (self.activity.items, 0..) |*a, i| {
+            if (self.heap.inHeap(@truncate(i)))
+                try self.heap.insert(@truncate(i), -a.* * 1e-100);
             a.* *= 1e-100;
         }
         self.act_increment *= 1e-100;

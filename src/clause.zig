@@ -168,7 +168,7 @@ pub const ClauseManager = struct {
     pub fn printClause(self: *Self, cref: ClauseRef) void {
         _ = self;
         for (cref.expr) |lit| {
-            var x: i64 = @intCast(i64, lit.variable());
+            var x: i64 = @intCast(lit.variable());
             var y: i64 = if (lit.sign()) x else -x;
             std.debug.print("{} ", .{y});
         }
@@ -203,10 +203,10 @@ pub const ClauseManager = struct {
     /// `fraction` is the fraction of clauses we keep the database,
     /// set the deleted clauses to deleted, call applyGC to delete it
     pub fn garbadgeCollect(self: *Self, fraction: f64) !void {
-        std.sort.sort(ClauseRef, self.learned_clauses.items, {}, Self.clauseLessThan);
+        std.mem.sort(ClauseRef, self.learned_clauses.items, {}, Self.clauseLessThan);
 
-        const db_size = @intToFloat(f64, self.learned_clauses.items.len);
-        var limit = @floatToInt(usize, fraction * db_size);
+        const db_size: f64 = @floatFromInt(self.learned_clauses.items.len);
+        var limit: usize = @intFromFloat(fraction * db_size);
         var arena = self.transition_allocator.allocator();
 
         var i: usize = 0;
