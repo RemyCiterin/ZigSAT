@@ -1,7 +1,7 @@
 
 
 profile: build
-	time perf record --call-graph=dwarf -- zig-out/bin/ZigSAT test.cnf
+	time perf record --call-graph=dwarf -- zig-out/bin/ZigSat ./test.cnf
 	perf report
 	rm -rf perf.data
 	rm -rf perf.data.old
@@ -16,10 +16,10 @@ glucose:
 	./glucose_static test.cnf -no-pre -ccmin-mode=2
 
 build:
-	zig build -Drelease-fast=true
+	zig build -Doptimize=ReleaseFast
 
 run:
-	time zig-out/bin/ZigSAT test.cnf
+	time zig-out/bin/ZigSat test.cnf
 
 test:
 	zig test src/solver.zig

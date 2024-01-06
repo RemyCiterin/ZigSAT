@@ -14,6 +14,7 @@ activity: std.ArrayList(f64),
 polarity: std.ArrayList(bool),
 act_increment: f64,
 act_decay: f64,
+rnd: std.rand.DefaultPrng,
 
 const Self = @This();
 
@@ -22,6 +23,7 @@ pub fn init(allocator: std.mem.Allocator) Self {
     self.activity = std.ArrayList(f64).init(allocator);
     self.polarity = std.ArrayList(bool).init(allocator);
     self.heap = Heap(Variable, variableToUsize).init(allocator);
+    self.rnd = std.rand.DefaultPrng.init(0);
     self.act_increment = 1.0;
     self.act_decay = 0.95;
     return self;
@@ -35,9 +37,10 @@ pub fn deinit(self: *Self) void {
 
 pub fn addVariable(self: *Self) !void {
     var v: Variable = @truncate(self.activity.items.len);
-    try self.heap.insert(v, 0.0);
+    var a: f64 = self.rnd.random().float(f64) * 0.1;
+    try self.heap.insert(v, -a);
     try self.polarity.append(true);
-    try self.activity.append(0.0);
+    try self.activity.append(a);
 }
 
 pub fn setState(self: *Self, v: Variable, st: lbool) !void {

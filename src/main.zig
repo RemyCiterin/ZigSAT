@@ -2,6 +2,42 @@ const std = @import("std");
 const Solver = @import("solver.zig").Solver;
 const Lit = @import("lit.zig").Lit;
 
+pub const EmptyPM = struct {
+    pub const Proof = void;
+
+    const This = @This();
+
+    pub fn addAxiom(this: *This, expr: []Lit) void {
+        _ = this;
+        _ = expr;
+    }
+
+    pub fn initResolution(this: *This, proof: void) void {
+        _ = proof;
+        _ = this;
+    }
+
+    pub fn borrow(this: *This, proof: void) void {
+        _ = proof;
+        _ = this;
+    }
+
+    pub fn release(this: *This, proof: void) void {
+        _ = proof;
+        _ = this;
+    }
+
+    pub fn pushResolutionStep(this: *This, v: @import("lit.zig").Variable, proof: void) void {
+        _ = proof;
+        _ = this;
+        _ = v;
+    }
+
+    pub fn finalizeResolution(this: *This) void {
+        _ = this;
+    }
+};
+
 pub fn main() !void {
     //var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = false }){};
     //const allocator = gpa.allocator();
@@ -9,13 +45,14 @@ pub fn main() !void {
     //    _ = gpa.deinit();
     //}
     var allocator = std.heap.c_allocator;
+    //var arena = std.heap.ArenaAllocator.init(main_allocator);
+    //defer arena.deinit();
+    //var allocator = arena.allocator();
 
-    var expr = std.ArrayList(Lit).init(allocator);
-    defer expr.deinit();
-
-    var solver = try Solver(void).init(allocator);
+    const ProofManager = EmptyPM;
+    var solver = try Solver(ProofManager).init(ProofManager{}, allocator);
     solver.verbose = 1;
-    defer solver.deinit();
+    //defer solver.deinit();
 
     var file_path = std.ArrayList(u8).init(allocator);
 
@@ -40,11 +77,11 @@ pub fn main() !void {
 
     try std.testing.expect(bytes_read == buffer.len);
 
-    try solver.parse(buffer);
+    try @import("parse.zig").parse(&solver, buffer);
 
     const assumptions: [0]Lit = undefined;
     var b = try solver.cdcl(assumptions[0..]);
     solver.stats.print(solver.progressEstimate());
-    if (b) try std.testing.expect(solver.checkModel());
-    std.debug.print("{}\n", .{b});
+    if (b == null) try std.testing.expect(solver.checkModel());
+    std.debug.print("{}\n", .{b == null});
 }

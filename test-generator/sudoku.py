@@ -1,7 +1,12 @@
+import numpy as np
+
 
 class BoolVar:
     ident = 3
     cnf = [[1], [-2]]
+    amo = []
+
+    var_map = {}
 
     def __init__(self, ident=None):
         if ident is None:
@@ -120,12 +125,49 @@ class BoolVar:
         return (~self | t) & (self | e)
 
     def __str__(self):
-        s = "p cnf {} {}\n".format(BoolVar.ident, len(BoolVar.cnf)+1)
-        s += "{} 0\n".format(self.ident)
+        vars = np.random.permutation(BoolVar.ident+10)
+
+        def get_var(x):
+            return x#vars[x-1]+1
+
+        def get_lit(x):
+            if x > 0:
+                return get_var(x)
+            else:
+                return -get_var(-x)
+
+        s = "p cnf {} {}\n".format(BoolVar.ident+200, len(BoolVar.cnf)+1)
+        s += "{} 0\n".format(get_lit(self.ident))
         for clause in BoolVar.cnf:
             for l in clause:
-                s += "{} ".format(l)
+                s += "{} ".format(get_lit(l))
             s += "0\n"
+        for clause in BoolVar.amo:
+            s += "amo "
+            for l in clause:
+                s += "{} ".format(get_lit(l))
+            s += "0\n"
+        return s
+
+    def to_smt2(self):
+        s = ""
+
+        for i in range(1, BoolVar.ident+1):
+            s += "(declare-fun x{} () Bool)\n".format(i)
+        s += "\n"
+
+        s += "(assert x{})".format(self.ident)
+        for clause in BoolVar.cnf:
+            if len(clause) > 0:
+                s += "(assert (or "
+                for l in clause:
+                    if l > 0:
+                        s += "x{} ".format(l)
+                    else:
+                        s += "(not x{}) ".format(-l)
+                s += "))\n"
+        s += "\n(check-sat)"
+
         return s
 
     def clear():
@@ -379,7 +421,7 @@ class Sudoku:
             ~(self.data[i][j] == self.data[k][l]))
 
 # return a boolean variable `b` such that `b ==> grid is sat`
-def add_sudoku(grid):
+def add_sudoku(grid, use_amo= False):
     constraint = BoolVar()
     data = {
             (i, j): grid.values[i, j] if (i, j) in grid.values else
@@ -398,11 +440,17 @@ def add_sudoku(grid):
         if not x in cache and not isinstance(data[x], int):
             cache[x] = None
 
-            for i in range(grid.size ** 2):
-                for j in range(i+1, grid.size * 2):
-                    BoolVar.add_cnf([
-                        [-constraint.ident, -data[x][i].ident, -data[x][j].ident]
-                    ])
+            if use_amo:
+                BoolVar.amo.append([
+                    [-constraint.ident] +
+                    [data[x][i].ident for i in range(grid.size ** 2)]
+                ])
+            else:
+                for i in range(grid.size ** 2):
+                    for j in range(i+1, grid.size * 2):
+                        BoolVar.add_cnf([
+                            [-constraint.ident, -data[x][i].ident, -data[x][j].ident]
+                        ])
 
             BoolVar.add_cnf([
                 [-constraint.ident] +
@@ -437,10 +485,15 @@ def add_sudoku(grid):
 import random
 import os
 
-def gen_grid(size, num):
+def gen_grid(size, max_size):
     grid = Grid(size)
 
-    while num > 0:
+    grid_size = 0
+    num_try = 0
+
+
+    while grid_size < max_size:
+        if num_try >= 100: break
         i = random.randint(0, (size ** 2) - 1)
         j = random.randint(0, (size ** 2) - 1)
         v = random.randint(1, size ** 2)
@@ -453,38 +506,18 @@ def gen_grid(size, num):
             if pair in grid.values and grid.values[pair] == v:
                 is_valid = False
 
-        if not is_valid: continue
+        if not is_valid:
+            num_try += 1
+            continue
+        num_try = 0
 
         grid.values[i, j] = v
-        num -= 1
+        grid_size += 1
+
+    print("==> grid size: {} ".format(grid_size))
 
     return grid
 
-'''
-for _ in range(10):
-    grid = gen_grid(3, 24)
-
-    grid.print()
-    #s = Sudoku(grid)
-    #constraints = constraints | s.constraint
-
-    f = open("./test.cnf", "w")
-    f.write(str(add_sudoku(grid)))
-    f.close()
-
-    os.system("../zig-out/bin/ZigSAT ./test.cnf")
-
-    BoolVar.clear()
-
-    f = open("./test.cnf", "w")
-    f.write(str(Sudoku(grid).constraint))
-    f.close()
-
-    os.system("../zig-out/bin/ZigSAT ./test.cnf")
-    BoolVar.clear()
-
-    print("\n-----------------------------------\n")
-'''
 
 def rand(N):
     while True:
@@ -507,24 +540,23 @@ def facto(N, bits):
     x = UBV.var(bits)
     y = UBV.var(bits)
 
-    return (x * y == N) & (y < N) & (x < N)
+    return (x * y == N) & (y < n) & (x < N)
 
 
 import subprocess
 import matplotlib.pyplot as plt
 
-import numpy as np
 import threading
 import time
 
-def benchmark(prog):
-    times = []
+def benchmark(progs, use_amo= False):
+    times = {str(s): [] for s in progs}
     queue = []
 
-    threads = 6
+    threads = 12
     busy = [False for _ in range(threads)]
 
-    def run(index):
+    def run(index, prog):
         p = subprocess.Popen(prog) #[prog,
             #'./test.cnf', '-no-pre',  '-phase-saving=2', '-ccmin-mode=1'])
         t = time.time()
@@ -532,45 +564,55 @@ def benchmark(prog):
             p.wait(10)
         except subprocess.TimeoutExpired:
             p.kill()
-        times.append(time.time() - t)
+        times[str(prog)].append(time.time() - t)
         busy[index] = False
         print(time.time()-t)
 
     for _ in range(30):
-        #grid = gen_grid(5, 250)
-        #constraint = add_sudoku(grid)
+        #grid = gen_grid(3, 25)
+        grid = gen_grid(5, 250)
+        #grid = gen_grid(5, 230)
+        #grid = gen_grid(6, 600)
+        #constraint = add_sudoku(grid, use_amo)
 
-        grid = gen_grid(3, 25)
-        constraint = Sudoku(grid).constraint
+        #grid = gen_grid(6, 600)
+        constraint = add_sudoku(grid)
 
-        #N = rand(2 ** 20)
+        #grid = gen_grid(4, 105)
+        #constraint = Sudoku(grid).constraint
+
+        #N = rand(2 ** 30)
         #print(N)
-        #constraint = facto(N, 42)
+        #constraint = facto(N, 47)
 
         #grid.print()
-        time.sleep(0.1)
+        time.sleep(0.3)
         f = open("./test.cnf", "w")
         f.write(str(constraint))
         f.close()
 
+        f = open("./test.smt2", "w")
+        f.write(constraint.to_smt2())
+        f.close()
 
-        if len(queue) < threads:
-            busy[len(queue)] = True
-            queue.append(threading.Thread(target=run, args=(len(queue),)))
-            queue[-1].start()
+        for prog in progs:
+            if len(queue) < threads:
+                busy[len(queue)] = True
+                queue.append(threading.Thread(target=run, args=(len(queue), prog)))
+                queue[-1].start()
 
-        else:
-            stop = False
-            while not stop:
-                for index in range(threads):
-                    if not busy[index]:
-                        busy[index] = True
-                        queue[index].join()
-                        queue[index] = \
-                            threading.Thread(target=run, args=(index,))
-                        queue[index].start()
-                        stop = True
-                        break
+            else:
+                stop = False
+                while not stop:
+                    for index in range(threads):
+                        if not busy[index]:
+                            busy[index] = True
+                            queue[index].join()
+                            queue[index] = \
+                                threading.Thread(target=run, args=(index, prog))
+                            queue[index].start()
+                            stop = True
+                            break
 
         BoolVar.clear()
 
@@ -580,20 +622,41 @@ def benchmark(prog):
     return times
 
 
+#creusat = ['/home/remy/Desktop/steel/CreuSAT/target/release/CreuSAT', '--file', 'test.cnf']
+zigsat = ['../zig-out/bin/ZigSat', 'test.cnf']
+zigsat_baseline = ['./zigsat_baseline', 'test.cnf']
+splr = ['./splr/target/release/splr', '-q', 'test.cnf']
+kissat = ['kissat', '-q', '-n', 'test.cnf']
+#rustsat1 = ['./rust_smt', 'test.cnf']
+rustsat1 = ['/home/remy/Desktop/rust_sat/target/release/rust_sat', 'test.cnf']
+rustsat2 = ['/home/remy/Documents/rust_smt/target/release/rust_smt', 'test.cnf']
+minisat = ['minisat', 'test.cnf', '-no-pre', '-ccmin-mode=1', '-verb=0', '-phase-saving=2', '-no-luby']
+glucose = ['glucose', 'test.cnf', '-no-pre', '-ccmin-mode=1', '-verb=0', '-phase-saving=2']
+z3 = ['z3', 'test.smt2']
 
-plt.plot(np.sort(benchmark(
-    ['kissat', 'test.cnf'])), label='kissat')
-plt.plot(np.sort(benchmark(
-    ['../zig-out/bin/ZigSat', 'test.cnf'])), label="ZigSAT")
-#plt.plot(np.sort(benchmark(
-#    ['../mathsat', '-input=dimacs', 'test.cnf'])), label="mathsat")
-plt.plot(np.sort(benchmark(
-    ['minisat', 'test.cnf', '-no-pre', '-ccmin-mode=1', '-phase-saving=2', '-no-luby'])), label="minisat")
-#plt.plot(np.sort(benchmark(
-#    ['../glucose_static', 'test.cnf', '-ccmin-mode=1', '-phase-saving=2'])), label="glucose2")
-plt.plot(np.sort(benchmark(
-    ['glucose', 'test.cnf', '-no-pre', '-ccmin-mode=1', '-phase-saving=2'])), label="glucose4")
+times = benchmark([zigsat_baseline, zigsat, rustsat1, minisat, glucose, splr, kissat])
+
+#plt.plot(np.sort(times[str(creusat)]), label="CreuSAT")
+plt.plot(np.sort(times[str(zigsat)]), 'g-', label="ZigSAT")
+plt.plot(np.sort(times[str(zigsat_baseline)]), 'g--', label="ZigSATb")
+plt.plot(np.sort(times[str(kissat)]), 'k-', label="kissat")
+plt.plot(np.sort(times[str(splr)]), 'k--', label="splr")
+plt.plot(np.sort(times[str(rustsat1)]), 'b-', label="RustSAT with free-list") # stop&copy")
+#plt.plot(np.sort(times[str(rustsat2)]), 'b--', label="RustSAT with RC")
+plt.plot(np.sort(times[str(minisat)]), 'r-', label="minisat")
+plt.plot(np.sort(times[str(glucose)]), 'r--', label="glucose")
+#plt.plot(np.sort(times[str(z3)]), label="z3")
 plt.yscale("log")
 plt.legend()
 plt.show()
 
+def print_comparison(xaxis, yaxis):
+    mini = min(np.min(times[str(xaxis)]), np.min(times[str(yaxis)]))
+    maxi = max(np.max(times[str(xaxis)]), np.max(times[str(yaxis)]))
+    plt.plot(times[str(xaxis)], times[str(yaxis)], '+')
+    plt.plot([mini, maxi], [mini, maxi], "b")
+    plt.yscale("log")
+    plt.xscale("log")
+    plt.show()
+
+print_comparison(zigsat, zigsat_baseline)

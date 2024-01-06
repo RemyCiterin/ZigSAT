@@ -12,12 +12,6 @@ pub const LearnedClauseStats = struct {
 
     /// literal block distance of the clause
     lbd: usize = 0,
-
-    /// for detach it's watched literals if the clause is deleted at GC
-    is_deleted: bool = false,
-
-    /// a reference to itself or it's new location
-    cref: *Clause,
 };
 
 pub const ClauseStats = union(enum) {
@@ -26,234 +20,301 @@ pub const ClauseStats = union(enum) {
 };
 
 /// clause description
-pub const Clause = struct {
-    /// statistics of the clause
-    stats: ClauseStats,
+pub fn Clause(comptime P: type) type {
+    return struct {
+        /// statistics of the clause
+        stats: ClauseStats,
 
-    /// expression of the clause, the two firsts literals are named
-    /// watched literals, they change with time
-    expr: []Lit,
+        /// a proof of the clause
+        proof: P,
 
-    /// the garbadge collector cannot delete a learned clause if lock is strictly positive
-    lock: u32,
+        /// expression of the clause, the two firsts literals are named
+        /// watched literals, they change with time
+        expr: []Lit,
 
-    pub fn is_deleted(self: @This()) bool {
-        switch (self.stats) {
-            .Learned => |lcs| return lcs.is_deleted,
-            else => return false,
-        }
-    }
+        /// the garbadge collector cannot delete a learned clause if lock is strictly positive
+        lock: u32,
 
-    pub fn newAddr(self: @This()) ?*@This() {
-        switch (self.stats) {
-            .Learned => |lcs| return lcs.cref,
-            else => return null,
-        }
-    }
-
-    pub fn setLBD(self: *@This(), lbd: usize) void {
-        switch (self.stats) {
-            .Learned => |*lcs| lcs.lbd = lbd,
-            else => {},
-        }
-    }
-};
-
-pub const ClauseManager = struct {
-    pub const ClauseRef = *Clause;
-
-    /// allocator for the diffents arena allocators
-    allocator: std.mem.Allocator,
-
-    /// arena allocator
-    main_allocator: std.heap.ArenaAllocator,
-
-    /// transition arena allocator, for reallocation
-    transition_allocator: std.heap.ArenaAllocator,
-
-    /// list of used learned clause by the solver
-    learned_clauses: std.ArrayList(ClauseRef),
-
-    /// list of initial clause used by the solver
-    initial_clauses: std.ArrayList(ClauseRef),
-
-    // /// set of deleted clause, call applyGC to delete
-    // deleted_clauses: std.ArrayList(ClauseRef),
-
-    /// clause activity decay factor
-    activity_decay_factor: f64,
-
-    /// current activity add at each call of incrActivity
-    activity_increment: f64,
-
-    const Self = @This();
-
-    /// initialize a clause manager
-    pub fn init(allocator: std.mem.Allocator) Self {
-        var self: Self = undefined;
-        self.learned_clauses = std.ArrayList(ClauseRef).init(allocator);
-        self.initial_clauses = std.ArrayList(ClauseRef).init(allocator);
-        //self.deleted_clauses = std.ArrayList(ClauseRef).init(allocator);
-        self.transition_allocator = std.heap.ArenaAllocator.init(allocator);
-        self.main_allocator = std.heap.ArenaAllocator.init(allocator);
-        self.activity_decay_factor = 0.999;
-        self.activity_increment = 1.0;
-        self.allocator = allocator;
-        return self;
-    }
-
-    /// free it's database but not it's clauses
-    pub fn deinit(self: *Self) void {
-        self.applyGC();
-
-        for (self.initial_clauses.items) |cref| {
-            self.deinitClause(cref);
-        }
-
-        self.main_allocator.deinit();
-        self.transition_allocator.deinit();
-
-        self.learned_clauses.deinit();
-        self.initial_clauses.deinit();
-    }
-
-    /// this function clone the expression
-    /// the caller have to dealloc it itself
-    pub fn initClause(self: *Self, is_learned: bool, expr: []const Lit) !ClauseRef {
-        var new_expr: []Lit = undefined;
-        var clause: ClauseRef = undefined;
-
-        if (is_learned) {
-            new_expr = try self.main_allocator.allocator().alloc(Lit, expr.len);
-            clause = try self.main_allocator.allocator().create(Clause);
-
-            try self.learned_clauses.append(clause);
-
-            var st = LearnedClauseStats{ .cref = clause };
-            clause.stats = ClauseStats{ .Learned = st };
-        } else {
-            new_expr = try self.allocator.alloc(Lit, expr.len);
-            clause = try self.allocator.create(Clause);
-
-            try self.initial_clauses.append(clause);
-
-            clause.stats = ClauseStats.Initial;
-        }
-
-        std.mem.copy(Lit, new_expr, expr);
-
-        clause.expr = new_expr;
-        clause.lock = 0;
-
-        return clause;
-    }
-
-    pub fn incrActivity(self: *Self, cref: ClauseRef) void {
-        if (cref.stats == .Initial) return;
-
-        cref.stats.Learned.activity += self.activity_increment;
-
-        if (cref.stats.Learned.activity > 1e20) {
-            for (self.learned_clauses.items) |c| {
-                c.stats.Learned.activity *= 1e-20;
+        pub fn setLBD(self: *@This(), lbd: usize) void {
+            switch (self.stats) {
+                .Learned => |*lcs| lcs.lbd = lbd,
+                else => {},
             }
-            self.activity_increment *= 1e-20;
-        }
-    }
-
-    pub fn decayActivity(self: *Self) void {
-        self.activity_increment *= 1.0 / self.activity_decay_factor;
-    }
-
-    pub fn printClause(self: *Self, cref: ClauseRef) void {
-        _ = self;
-        for (cref.expr) |lit| {
-            var x: i64 = @intCast(lit.variable());
-            var y: i64 = if (lit.sign()) x else -x;
-            std.debug.print("{} ", .{y});
-        }
-        std.debug.print("\n", .{});
-    }
-
-    pub fn printDB(self: *Self) void {
-        std.debug.print("initial clauses\n", .{});
-
-        for (self.initial_clauses.items) |clause| {
-            self.printClause(clause);
         }
 
-        std.debug.print("learned clauses\n", .{});
-
-        for (self.learned_clauses.items) |clause| {
-            self.printClause(clause);
+        fn setActivity(self: *@This(), act: f64) void {
+            switch (self.stats) {
+                .Learned => |*lcs| lcs.activity = act,
+                else => {},
+            }
         }
-    }
+    };
+}
 
-    fn clauseLessThan(context: void, lhs: ClauseRef, rhs: ClauseRef) bool {
-        _ = context;
-        if (lhs.stats.Learned.lbd != rhs.stats.Learned.lbd)
-            return lhs.stats.Learned.lbd < rhs.stats.Learned.lbd;
+pub fn ClauseDB(comptime P: type) type {
+    return struct {
+        const DB = @import("db.zig").DB(Clause(P));
+        pub const ClauseRef = struct {
+            id: DB.Id,
+            learned: bool,
 
-        if (lhs.expr.len != rhs.expr.len)
-            return lhs.expr.len < rhs.expr.len;
+            pub fn equal(self: @This(), other: @This()) bool {
+                if (self.learned == other.learned)
+                    return self.id.equal(other.id);
 
-        return lhs.stats.Learned.activity > rhs.stats.Learned.activity;
-    }
+                return false;
+            }
+        };
 
-    /// `fraction` is the fraction of clauses we keep the database,
-    /// set the deleted clauses to deleted, call applyGC to delete it
-    pub fn garbadgeCollect(self: *Self, fraction: f64) !void {
-        std.mem.sort(ClauseRef, self.learned_clauses.items, {}, Self.clauseLessThan);
+        pub const Iterator = struct {
+            learned: bool,
+            iter: DB.Iterator,
 
-        const db_size: f64 = @floatFromInt(self.learned_clauses.items.len);
-        var limit: usize = @intFromFloat(fraction * db_size);
-        var arena = self.transition_allocator.allocator();
+            pub fn next(self: *@This()) ?ClauseRef {
+                var id = self.iter.next() orelse return null;
+                return .{ .id = id, .learned = self.learned };
+            }
+        };
 
-        var i: usize = 0;
-        while (i < self.learned_clauses.items.len) {
-            var cref: ClauseRef = self.learned_clauses.items[i];
+        /// allocator for the diffents arena allocators
+        allocator: std.mem.Allocator,
 
-            var delete = i > limit and cref.expr.len >= 3 and cref.stats.Learned.lbd >= 3;
+        /// arena allocator
+        main_arena: std.heap.ArenaAllocator,
 
-            if (cref.lock == 0 and (delete or cref.is_deleted())) {
-                _ = self.learned_clauses.swapRemove(i);
-                cref.stats.Learned.is_deleted = true;
+        /// transition arena allocator, for reallocation
+        transition_arena: std.heap.ArenaAllocator,
+
+        /// list of used learned clause by the solver
+        learned_clauses: DB,
+
+        /// list of initial clause used by the solver
+        initial_clauses: DB,
+
+        /// clause activity decay factor
+        activity_decay_factor: f64,
+
+        /// current activity add at each call of incrActivity
+        activity_increment: f64,
+
+        const Self = @This();
+
+        /// initialize a clause manager
+        pub fn init(allocator: std.mem.Allocator) Self {
+            return Self{
+                .learned_clauses = DB.init(allocator),
+                .initial_clauses = DB.init(allocator),
+                .transition_arena = std.heap.ArenaAllocator.init(allocator),
+                .main_arena = std.heap.ArenaAllocator.init(allocator),
+                .activity_decay_factor = 0.99,
+                .activity_increment = 1.0,
+                .allocator = allocator,
+            };
+        }
+
+        /// free it's database but not it's clauses
+        pub fn deinit(self: *Self) void {
+            var iter = self.initial_clauses.iter();
+            while (iter.next()) |id| {
+                var c = self.initial_clauses.borrow(id);
+                self.allocator.free(c.expr);
+            }
+
+            self.initial_clauses.deinit();
+            self.learned_clauses.deinit();
+
+            self.main_arena.deinit();
+            self.transition_arena.deinit();
+        }
+
+        pub fn borrow(self: *Self, cref: ClauseRef) *Clause(P) {
+            if (cref.learned) {
+                return self.learned_clauses.borrow(cref.id);
             } else {
-                var expr = try arena.alloc(Lit, cref.expr.len);
-                std.mem.copy(Lit, expr, cref.expr);
-                cref.expr = expr;
-
-                var new_cref = try arena.create(Clause);
-                cref.stats.Learned.cref = new_cref;
-                new_cref.* = cref.*;
-
-                self.learned_clauses.items[i] = new_cref;
-                i += 1;
+                return self.initial_clauses.borrow(cref.id);
             }
         }
-    }
 
-    pub fn applyGC(self: *Self) void {
-        self.main_allocator.deinit();
-        self.main_allocator = self.transition_allocator;
-        self.transition_allocator = std.heap.ArenaAllocator.init(self.allocator);
-    }
+        pub fn free(self: *Self, cref: ClauseRef) void {
+            if (cref.learned) {
+                self.learned_clauses.free(cref.id);
+            } else {
+                self.initial_clauses.free(cref.id);
+            }
+        }
 
-    pub fn decrLock(self: *Self, cref: ClauseRef) void {
-        cref.lock -= 1;
-        _ = self;
-    }
+        pub fn is_free(self: *Self, cref: ClauseRef) bool {
+            if (cref.learned) {
+                return self.learned_clauses.is_free(cref.id);
+            } else {
+                return self.initial_clauses.is_free(cref.id);
+            }
+        }
 
-    pub fn incrLock(self: *Self, cref: ClauseRef) void {
-        cref.lock += 1;
-        _ = self;
-    }
+        pub fn iter_learned(self: *Self) Iterator {
+            return Iterator{ .learned = true, .iter = self.learned_clauses.iter() };
+        }
 
-    pub fn deinitClause(self: *Self, cref: ClauseRef) void {
-        self.allocator.free(cref.expr);
-        self.allocator.destroy(cref);
-    }
-};
+        pub fn iter_initial(self: *Self) Iterator {
+            return Iterator{ .learned = false, .iter = self.initial_clauses.iter() };
+        }
+
+        pub fn len_learned(self: *Self) usize {
+            return self.learned_clauses.len();
+        }
+
+        pub fn len_initial(self: *Self) usize {
+            return self.initial_clauses.len();
+        }
+
+        /// this function clone the expression
+        /// the caller have to dealloc it itself
+        pub fn initClause(self: *Self, is_learned: bool, expr: []const Lit, proof: P) !ClauseRef {
+            var new_expr: []Lit = undefined;
+            var cref: ClauseRef = undefined;
+            var stats: ClauseStats = undefined;
+
+            if (is_learned) {
+                new_expr = try self.main_arena.allocator().alloc(Lit, expr.len);
+                cref = ClauseRef{
+                    .learned = true,
+                    .id = try self.learned_clauses.alloc(undefined),
+                };
+
+                var st = LearnedClauseStats{};
+                stats = ClauseStats{ .Learned = st };
+            } else {
+                new_expr = try self.allocator.alloc(Lit, expr.len);
+                cref = ClauseRef{
+                    .learned = false,
+                    .id = try self.initial_clauses.alloc(undefined),
+                };
+
+                stats = ClauseStats.Initial;
+            }
+
+            std.mem.copy(Lit, new_expr, expr);
+
+            self.borrow(cref).* = .{
+                .stats = stats,
+                .expr = new_expr,
+                .proof = proof,
+                .lock = 0,
+            };
+
+            return cref;
+        }
+
+        pub fn incrActivity(self: *Self, cref: ClauseRef) void {
+            var clause: *Clause(P) = self.borrow(cref);
+            if (clause.stats == .Initial) return;
+
+            clause.stats.Learned.activity += self.activity_increment;
+
+            if (clause.stats.Learned.activity > 1e20) {
+                var learned = self.iter_learned();
+
+                while (learned.next()) |c| {
+                    self.borrow(c).stats.Learned.activity *= 1e-20;
+                }
+                self.activity_increment *= 1e-20;
+            }
+        }
+
+        pub fn decayActivity(self: *Self) void {
+            self.activity_increment *= 1.0 / self.activity_decay_factor;
+        }
+
+        pub fn printClause(self: *Self, cref: ClauseRef) void {
+            var clause = self.borrow(cref);
+            for (clause.expr) |lit| {
+                var x: i64 = @intCast(lit.variable());
+                var y: i64 = if (lit.sign()) x else -x;
+                std.debug.print("{} ", .{y});
+            }
+            std.debug.print("\n", .{});
+        }
+
+        pub fn printDB(self: *Self) void {
+            std.debug.print("initial clauses\n", .{});
+
+            for (self.initial_clauses.elems.items) |clause| {
+                self.printClause(clause);
+            }
+
+            std.debug.print("learned clauses\n", .{});
+
+            for (self.learned_clauses.elems.items) |clause| {
+                self.printClause(clause);
+            }
+        }
+
+        fn clauseLessThan(self: *Self, lhs_ref: ClauseRef, rhs_ref: ClauseRef) bool {
+            var lhs = self.borrow(lhs_ref);
+            var rhs = self.borrow(rhs_ref);
+
+            //if (lhs.stats.Learned.lbd != rhs.stats.Learned.lbd)
+            //    return lhs.stats.Learned.lbd < rhs.stats.Learned.lbd;
+
+            //if (lhs.expr.len != rhs.expr.len)
+            //    return lhs.expr.len < rhs.expr.len;
+
+            return lhs.stats.Learned.activity > rhs.stats.Learned.activity;
+        }
+
+        /// `fraction` is the fraction of clauses we keep the database
+        pub fn garbadgeCollect(self: *Self, fraction: f64) !void {
+            var learned_ref = try std.ArrayList(ClauseRef).initCapacity(
+                self.allocator,
+                self.learned_clauses.len(),
+            );
+            defer learned_ref.deinit();
+
+            var iter = self.learned_clauses.iter();
+            while (iter.next()) |id| {
+                try learned_ref.append(.{ .id = id, .learned = true });
+            }
+
+            std.mem.sort(ClauseRef, learned_ref.items, self, Self.clauseLessThan);
+
+            const db_size: f64 = @floatFromInt(self.learned_clauses.len());
+            var limit: usize = @intFromFloat(fraction * db_size);
+            var arena = self.transition_arena.allocator();
+
+            var i: usize = 0;
+            for (learned_ref.items) |cref| {
+                var clause = self.borrow(cref);
+
+                var delete = i > limit and clause.expr.len >= 3 and clause.stats.Learned.lbd >= 3;
+
+                if (clause.lock == 0 and delete) {
+                    self.learned_clauses.free(cref.id);
+                } else {
+                    var expr = try arena.alloc(Lit, clause.expr.len);
+                    std.mem.copy(Lit, expr, clause.expr);
+                    clause.expr = expr;
+                }
+            }
+
+            self.main_arena.deinit();
+            self.main_arena = self.transition_arena;
+            self.transition_arena = std.heap.ArenaAllocator.init(self.allocator);
+        }
+
+        pub fn decrLock(self: *Self, cref: ClauseRef) void {
+            self.borrow(cref).lock -= 1;
+        }
+
+        pub fn incrLock(self: *Self, cref: ClauseRef) void {
+            self.borrow(cref).lock += 1;
+        }
+
+        pub fn deinitClause(self: *Self, cref: ClauseRef) void {
+            self.allocator.free(cref.expr);
+            self.allocator.destroy(cref);
+        }
+    };
+}
 
 test "random clause manager test" {
     var rnd = std.rand.DefaultPrng.init(0);
@@ -267,9 +328,9 @@ test "random clause manager test" {
     defer expr.deinit();
 
     comptime var step = 0;
+    var cm = ClauseDB(void).init(allocator);
+    defer cm.deinit();
     inline while (step < 10) : (step += 1) {
-        var cm = ClauseManager.init(allocator);
-        defer cm.deinit();
 
         // create clauses
         var num_clauses: usize = 0;
@@ -288,15 +349,20 @@ test "random clause manager test" {
                 try expr.append(lit);
             }
 
-            _ = try cm.initClause(rnd.random().int(u32) % 2 == 0, expr.items);
+            _ = try cm.initClause(rnd.random().int(u32) % 2 == 0, expr.items, {});
             expr.clearRetainingCapacity();
         }
 
-        for (cm.learned_clauses.items) |cref| {
-            cref.stats.Learned.activity = rnd.random().float(f64);
+        var iter = cm.iter_learned();
+        while (iter.next()) |cref| {
+            var clause = cm.borrow(cref);
+            var act = rnd.random().float(f64);
+            clause.stats.Learned.activity = act;
+
+            try std.testing.expect(cm.borrow(cref).stats.Learned.activity == act);
         }
 
         try cm.garbadgeCollect(0.7);
-        cm.applyGC();
+        std.debug.print("{}\n", .{cm.learned_clauses.len()});
     }
 }
