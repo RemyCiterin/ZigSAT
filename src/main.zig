@@ -39,6 +39,15 @@ pub const EmptyPM = struct {
 };
 
 pub fn main() !void {
+    comptime {
+        @import("trait.zig").Trait(EmptyPM, .{
+            .{ "Proof", type },
+            .{ "addAxiom", fn (*EmptyPM, []Lit) void },
+            .{ "initResolution", fn (*EmptyPM, EmptyPM.Proof) void },
+            .{ "pushResolutionStep", fn (*EmptyPM, @import("lit.zig").Variable, EmptyPM.Proof) void },
+            .{ "finalizeResolution", fn (*EmptyPM) EmptyPM.Proof },
+        });
+    }
     //var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = false }){};
     //const allocator = gpa.allocator();
     //defer {
@@ -62,7 +71,7 @@ pub fn main() !void {
 
     //const file_path =
     //    try std.fmt.allocPrint(allocator, "test.cnf", .{});
-    std.debug.print("{s}\n", .{file_path.items});
+    std.debug.print("c {s}\n", .{file_path.items});
     defer file_path.deinit();
 
     const file = try std.fs.cwd().openFile(file_path.items, .{});
@@ -81,7 +90,9 @@ pub fn main() !void {
 
     const assumptions: [0]Lit = undefined;
     var b = try solver.cdcl(assumptions[0..]);
+
+    std.debug.print("c ", .{});
     solver.stats.print(solver.progressEstimate());
     if (b == null) try std.testing.expect(solver.checkModel());
-    std.debug.print("{}\n", .{b == null});
+    std.debug.print("s {s}\n", .{if (b == null) "SAT" else "UNSAT"});
 }

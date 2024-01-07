@@ -570,16 +570,16 @@ def benchmark(progs, use_amo= False):
 
     for _ in range(30):
         #grid = gen_grid(3, 25)
-        grid = gen_grid(5, 250)
+        #grid = gen_grid(5, 250)
         #grid = gen_grid(5, 230)
         #grid = gen_grid(6, 600)
         #constraint = add_sudoku(grid, use_amo)
 
         #grid = gen_grid(6, 600)
-        constraint = add_sudoku(grid)
+        #constraint = add_sudoku(grid)
 
-        #grid = gen_grid(4, 105)
-        #constraint = Sudoku(grid).constraint
+        grid = gen_grid(4, 100)
+        constraint = Sudoku(grid).constraint
 
         #N = rand(2 ** 30)
         #print(N)
@@ -634,17 +634,18 @@ minisat = ['minisat', 'test.cnf', '-no-pre', '-ccmin-mode=1', '-verb=0', '-phase
 glucose = ['glucose', 'test.cnf', '-no-pre', '-ccmin-mode=1', '-verb=0', '-phase-saving=2']
 z3 = ['z3', 'test.smt2']
 
-times = benchmark([zigsat_baseline, zigsat, rustsat1, minisat, glucose, splr, kissat])
+# times = benchmark([zigsat_baseline, zigsat, rustsat1, minisat, glucose, splr, kissat])
+times = benchmark([zigsat_baseline, zigsat])
 
 #plt.plot(np.sort(times[str(creusat)]), label="CreuSAT")
 plt.plot(np.sort(times[str(zigsat)]), 'g-', label="ZigSAT")
 plt.plot(np.sort(times[str(zigsat_baseline)]), 'g--', label="ZigSATb")
-plt.plot(np.sort(times[str(kissat)]), 'k-', label="kissat")
-plt.plot(np.sort(times[str(splr)]), 'k--', label="splr")
-plt.plot(np.sort(times[str(rustsat1)]), 'b-', label="RustSAT with free-list") # stop&copy")
-#plt.plot(np.sort(times[str(rustsat2)]), 'b--', label="RustSAT with RC")
-plt.plot(np.sort(times[str(minisat)]), 'r-', label="minisat")
-plt.plot(np.sort(times[str(glucose)]), 'r--', label="glucose")
+# plt.plot(np.sort(times[str(kissat)]), 'k-', label="kissat")
+# plt.plot(np.sort(times[str(splr)]), 'k--', label="splr")
+# plt.plot(np.sort(times[str(rustsat1)]), 'b-', label="RustSAT with free-list") # stop&copy")
+# #plt.plot(np.sort(times[str(rustsat2)]), 'b--', label="RustSAT with RC")
+# plt.plot(np.sort(times[str(minisat)]), 'r-', label="minisat")
+# plt.plot(np.sort(times[str(glucose)]), 'r--', label="glucose")
 #plt.plot(np.sort(times[str(z3)]), label="z3")
 plt.yscale("log")
 plt.legend()

@@ -82,9 +82,6 @@ pub fn ClauseDB(comptime P: type) type {
         /// arena allocator
         main_arena: std.heap.ArenaAllocator,
 
-        /// transition arena allocator, for reallocation
-        transition_arena: std.heap.ArenaAllocator,
-
         /// list of used learned clause by the solver
         learned_clauses: DB,
 
@@ -104,7 +101,6 @@ pub fn ClauseDB(comptime P: type) type {
             return Self{
                 .learned_clauses = DB.init(allocator),
                 .initial_clauses = DB.init(allocator),
-                .transition_arena = std.heap.ArenaAllocator.init(allocator),
                 .main_arena = std.heap.ArenaAllocator.init(allocator),
                 .activity_decay_factor = 0.99,
                 .activity_increment = 1.0,
@@ -124,7 +120,6 @@ pub fn ClauseDB(comptime P: type) type {
             self.learned_clauses.deinit();
 
             self.main_arena.deinit();
-            self.transition_arena.deinit();
         }
 
         pub fn borrow(self: *Self, cref: ClauseRef) *Clause(P) {
@@ -253,13 +248,13 @@ pub fn ClauseDB(comptime P: type) type {
             var lhs = self.borrow(lhs_ref);
             var rhs = self.borrow(rhs_ref);
 
-            //if (lhs.stats.Learned.lbd != rhs.stats.Learned.lbd)
-            //    return lhs.stats.Learned.lbd < rhs.stats.Learned.lbd;
+            if (lhs.stats.Learned.lbd != rhs.stats.Learned.lbd)
+                return lhs.stats.Learned.lbd > rhs.stats.Learned.lbd;
 
             //if (lhs.expr.len != rhs.expr.len)
             //    return lhs.expr.len < rhs.expr.len;
 
-            return lhs.stats.Learned.activity > rhs.stats.Learned.activity;
+            return lhs.stats.Learned.activity < rhs.stats.Learned.activity;
         }
 
         /// `fraction` is the fraction of clauses we keep the database
@@ -279,26 +274,27 @@ pub fn ClauseDB(comptime P: type) type {
 
             const db_size: f64 = @floatFromInt(self.learned_clauses.len());
             var limit: usize = @intFromFloat(fraction * db_size);
-            var arena = self.transition_arena.allocator();
+            var arena = std.heap.ArenaAllocator.init(self.allocator);
+            var allocator = arena.allocator();
 
             var i: usize = 0;
             for (learned_ref.items) |cref| {
                 var clause = self.borrow(cref);
 
-                var delete = i > limit and clause.expr.len >= 3 and clause.stats.Learned.lbd >= 3;
+                var delete = i < limit; // and clause.stats.Learned.lbd >= 3;
 
                 if (clause.lock == 0 and delete) {
                     self.learned_clauses.free(cref.id);
+                    i += 1;
                 } else {
-                    var expr = try arena.alloc(Lit, clause.expr.len);
+                    var expr = try allocator.alloc(Lit, clause.expr.len);
                     std.mem.copy(Lit, expr, clause.expr);
                     clause.expr = expr;
                 }
             }
 
             self.main_arena.deinit();
-            self.main_arena = self.transition_arena;
-            self.transition_arena = std.heap.ArenaAllocator.init(self.allocator);
+            self.main_arena = arena;
         }
 
         pub fn decrLock(self: *Self, cref: ClauseRef) void {

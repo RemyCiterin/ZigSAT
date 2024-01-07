@@ -25,7 +25,7 @@ pub fn init(allocator: std.mem.Allocator) Self {
     self.heap = Heap(Variable, variableToUsize).init(allocator);
     self.rnd = std.rand.DefaultPrng.init(0);
     self.act_increment = 1.0;
-    self.act_decay = 0.95;
+    self.act_decay = 0.85;
     return self;
 }
 
@@ -38,8 +38,9 @@ pub fn deinit(self: *Self) void {
 pub fn addVariable(self: *Self) !void {
     var v: Variable = @truncate(self.activity.items.len);
     var a: f64 = self.rnd.random().float(f64) * 0.1;
+    var p: bool = self.rnd.random().float(f32) > 0.5;
     try self.heap.insert(v, -a);
-    try self.polarity.append(true);
+    try self.polarity.append(p);
     try self.activity.append(a);
 }
 

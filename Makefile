@@ -1,7 +1,7 @@
 
 
 profile: build
-	time perf record --call-graph=dwarf -- zig-out/bin/ZigSat ./test.cnf
+	time perf record --call-graph=dwarf -- zig-out/bin/ZigSat ./test-generator/test.cnf
 	perf report
 	rm -rf perf.data
 	rm -rf perf.data.old

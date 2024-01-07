@@ -89,7 +89,10 @@ pub const Lit = union(LitTag) {
     }
 
     pub fn not(self: Self) Self {
-        return Self.init(self.variable(), !self.sign());
+        return switch (self) {
+            .pos => |v| Self{ .neg = v },
+            .neg => |v| Self{ .pos = v },
+        };
     }
 
     pub fn variable(self: Self) u31 {

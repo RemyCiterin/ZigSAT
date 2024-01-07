@@ -109,6 +109,16 @@ pub const SolverStats = struct {
 };
 
 pub fn Solver(comptime ProofManager: type) type {
+    comptime {
+        @import("trait.zig").Trait(ProofManager, .{
+            .{ "Proof", type },
+            .{ "addAxiom", fn (*ProofManager, []Lit) void },
+            .{ "initResolution", fn (*ProofManager, ProofManager.Proof) void },
+            .{ "pushResolutionStep", fn (*ProofManager, Variable, ProofManager.Proof) void },
+            .{ "finalizeResolution", fn (*ProofManager) ProofManager.Proof },
+        });
+    }
+
     return struct {
         pub const Proof = ProofManager.Proof;
         pub const ClauseRef = ClauseDB(Proof).ClauseRef;
@@ -706,7 +716,7 @@ pub fn Solver(comptime ProofManager: type) type {
             try self.clause_db.garbadgeCollect(factor);
 
             if (self.verbose >= 1) {
-                std.debug.print("{}  ", .{@as(usize, @intFromFloat(self.lbd_stats.mean_size))});
+                std.debug.print("c {}  ", .{@as(usize, @intFromFloat(self.lbd_stats.mean_size))});
                 std.debug.print("{}  ", .{self.clause_db.len_learned()});
                 self.stats.print(self.progressEstimate());
             }
