@@ -31,28 +31,23 @@ pub fn Watcher(comptime ClauseRef: type) type {
     return struct { cref: ClauseRef, blocker: Lit };
 }
 
-/// the state of an assigned literal is the decision level of the assignation,
-/// the value of the assignation, and the clause at the origin of the assignation,
-/// all the literals of this clause must be assigned to false and
-/// `Lit.init(var, value)` must be a literal of this clause
-pub fn AssignedVarState(comptime ClauseRef: type, comptime P: type) type {
-    return struct {
-        level: u32,
-        value: bool,
-        reason: ?ClauseRef,
-        proof: ?P,
-        position: usize,
-    };
-}
-
 const Variable = @import("lit.zig").Variable;
 pub const variableToUsize = @import("lit.zig").variableToUsize;
 
 /// all the data of a variable store by the solver
 fn VarData(comptime ClauseRef: type, comptime P: type) type {
     return struct {
-        /// state: assigned or not and why
-        state: ?AssignedVarState(ClauseRef, P),
+        /// current level of assignation of the variable (if assigned)
+        level: ?u32,
+
+        /// current value of assignation of the variable
+        value: lbool,
+
+        /// reason of assignation of the variable (if assigned at a level > 0, and not a decision variable)
+        reason: ?ClauseRef,
+
+        /// proof of assignation of the variable (if assigned a level 0)
+        proof: ?P,
 
         /// the list of all the watchers of the literal `Lit.init(variable, true)`
         pos_watchers: std.ArrayList(Watcher(ClauseRef)),
@@ -80,7 +75,12 @@ pub const SolverStats = struct {
     }
 
     pub fn print(self: Self, progress: f64) void {
-        std.debug.print("{}  {}  {}  {}\n", .{ self.restart, self.conflict, self.prop, progress });
+        std.debug.print("rst: {}  conf: {}  prop: {}  progress: {d:.4}\n", .{
+            self.restart,
+            self.conflict,
+            self.prop,
+            progress,
+        });
     }
 
     pub fn addRestart(self: *Self) void {
@@ -137,7 +137,7 @@ pub fn Solver(comptime ProofManager: type) type {
         clause_db: ClauseDB(Proof),
 
         /// set of variables and variables data
-        variables: std.ArrayList(VarData(ClauseRef, Proof)),
+        variables: std.MultiArrayList(VarData(ClauseRef, Proof)),
 
         /// use and compute lbd
         lbd_stats: LBDstats,
@@ -178,7 +178,7 @@ pub fn Solver(comptime ProofManager: type) type {
         /// print the current solving progress of the solver
         pub fn progressEstimate(self: *Self) f64 {
             var progress: f64 = 0.0;
-            const F: f64 = 1.0 / @as(f64, @floatFromInt(self.variables.items.len));
+            const F: f64 = 1.0 / @as(f64, @floatFromInt(self.variables.len));
             var level: usize = 0;
 
             for (self.assignation_queue.items) |l| {
@@ -188,7 +188,7 @@ pub fn Solver(comptime ProofManager: type) type {
                 progress += std.math.pow(f64, F, @as(f64, @floatFromInt(level)));
             }
 
-            return progress / @as(f64, @floatFromInt(self.variables.items.len));
+            return progress / @as(f64, @floatFromInt(self.variables.len));
         }
 
         /// check if the current model satisfy all the initial clauses
@@ -206,43 +206,6 @@ pub fn Solver(comptime ProofManager: type) type {
             }
 
             return true;
-        }
-
-        pub fn checkWatchersState(self: *Self) !void {
-            for (self.variables.items, 0..) |var_data, variable| {
-                var v: Variable = @intCast(variable);
-
-                for (var_data.pos_watchers.items) |w| {
-                    var clause = self.clause_db.borrow(w.cref);
-                    try std.testing.expect(clause.expr[0].equals(Lit.init(v, true)) or
-                        clause.expr[1].equals(Lit.init(v, true)));
-                }
-
-                for (var_data.neg_watchers.items) |w| {
-                    var clause = self.clause_db.borrow(w.cref);
-                    try std.testing.expect(clause.expr[0].equals(Lit.init(v, false)) or
-                        clause.expr[1].equals(Lit.init(v, false)));
-                }
-            }
-        }
-
-        /// check if their is still a variable to assign using the current clauses
-        pub fn checkPropagateComplete(self: *Self) !void {
-            var initial = self.clause_db.iter_initial();
-            c_loop: while (initial.next()) |cref| {
-                var clause = self.clause_db.borrow(cref);
-                var count: usize = 0;
-
-                for (clause.expr) |lit| {
-                    switch (self.value(lit)) {
-                        .ltrue => continue :c_loop,
-                        .lundef => count += 1,
-                        .lfalse => {},
-                    }
-                }
-
-                try std.testing.expect(count >= 2);
-            }
         }
 
         /// propagate all the assigned variables and see if their is a conflict
@@ -329,17 +292,30 @@ pub fn Solver(comptime ProofManager: type) type {
         }
 
         /// return the level of assignation of an assigned variable
+        /// undefined behaviour if the variable is not assigned
         pub fn levelOf(self: Self, variable: Variable) u32 {
-            return self.variables.items[variable].state.?.level;
+            return self.variables.items(.level)[variable].?;
         }
 
+        /// return the reason of assignation of an assigned variables:
+        /// null if the variable is a decision variable of a variable assigned at level 0
+        /// undefined behaviour if the variable is not assigned
         pub fn reasonOf(self: Self, variable: Variable) ?ClauseRef {
-            return self.variables.items[variable].state.?.reason;
+            return self.variables.items(.reason)[variable];
         }
 
         /// return a proof of assignation of an assigned variable, if `self.levelOf(v) == 0`
+        /// undefined behaviour if the variable is not assigned
         pub fn proofOf(self: Self, variable: Variable) ?Proof {
-            return self.variables.items[variable].state.?.proof;
+            return self.variables.items(.proof)[variable];
+        }
+
+        /// return the value of assignation of a literal, `.lundef` if not assigned
+        pub fn value(self: Self, lit: Lit) lbool {
+            var v = self.variables.items(.value)[lit.variable()];
+
+            if (v == .lundef) return v;
+            return lbool.init(v.sign() == lit.sign());
         }
 
         pub fn print(self: *Self) void {
@@ -354,47 +330,52 @@ pub fn Solver(comptime ProofManager: type) type {
             std.debug.print("\n", .{});
         }
 
-        pub fn value(self: Self, lit: Lit) lbool {
-            var st = self.variables.items[lit.variable()].state;
+        /// remove all the literals assigned to `false` of a clause at level `0`,
+        /// or remove the clause if it is satisfied at level `0`
+        fn simplify_clause(self: *Self, cref: ClauseRef) !void {
+            try std.testing.expect(self.level == 0);
 
-            if (st == null) return .lundef;
-            return lbool.init(st.?.value == lit.sign());
+            var clause = self.clause_db.borrow(cref);
+
+            for (clause.expr) |lit| {
+                if (self.value(lit) == .ltrue) {
+                    self.proof_manager.release(clause.proof);
+                    self.detachClause(cref);
+                    self.clause_db.free(cref);
+                    return;
+                }
+            }
+
+            self.proof_manager.initResolution(clause.proof);
+            self.proof_manager.release(clause.proof);
+
+            var i: usize = 2;
+            while (i < clause.expr.len) {
+                var lit = clause.expr[i];
+                if (self.value(lit) == .lfalse) {
+                    self.proof_manager.pushResolutionStep(lit.variable(), self.proofOf(lit.variable()).?);
+                    std.mem.swap(Lit, &clause.expr[i], &clause.expr[clause.expr.len - 1]);
+                    clause.expr.len -= 1;
+                    continue;
+                }
+
+                i += 1;
+            }
+
+            clause.proof = self.proof_manager.finalizeResolution();
         }
 
         pub fn simplify(self: *Self) !void {
             try std.testing.expect(self.level == 0);
-            // now it just simplify the learned clauses, not the initial clauses
 
             var learned = self.clause_db.iter_learned();
-            main_loop: while (learned.next()) |cref| {
-                var clause = self.clause_db.borrow(cref);
+            while (learned.next()) |cref| {
+                try self.simplify_clause(cref);
+            }
 
-                for (clause.expr) |lit| {
-                    if (self.value(lit) == .ltrue) {
-                        self.proof_manager.release(clause.proof);
-                        self.detachClause(cref);
-                        self.clause_db.free(cref);
-                        continue :main_loop;
-                    }
-                }
-
-                self.proof_manager.initResolution(clause.proof);
-                self.proof_manager.release(clause.proof);
-
-                var i: usize = 2;
-                while (i < clause.expr.len) {
-                    var lit = clause.expr[i];
-                    if (self.value(lit) == .lfalse) {
-                        self.proof_manager.pushResolutionStep(lit.variable(), self.proofOf(lit.variable()).?);
-                        std.mem.swap(Lit, &clause.expr[i], &clause.expr[clause.expr.len - 1]);
-                        clause.expr.len -= 1;
-                        continue;
-                    }
-
-                    i += 1;
-                }
-
-                clause.proof = self.proof_manager.finalizeResolution();
+            var initial = self.clause_db.iter_initial();
+            while (initial.next()) |cref| {
+                try self.simplify_clause(cref);
             }
         }
 
@@ -484,14 +465,6 @@ pub fn Solver(comptime ProofManager: type) type {
             if (cref) |_| try std.testing.expect(self.level > 0);
             if (self.level == 0) try std.testing.expect(proof != null);
 
-            var st = .{
-                .level = self.level,
-                .reason = cref,
-                .position = self.assignation_queue.items.len,
-                .value = lit.sign(),
-                .proof = proof,
-            };
-
             try self.assignation_queue.append(lit);
             try self.propagation_queue.append(lit);
 
@@ -499,7 +472,11 @@ pub fn Solver(comptime ProofManager: type) type {
                 self.clause_db.incrLock(cref.?);
             }
 
-            self.variables.items[lit.variable()].state = st;
+            self.variables.items(.value)[lit.variable()] = lbool.init(lit.sign());
+            self.variables.items(.level)[lit.variable()] = self.level;
+            self.variables.items(.reason)[lit.variable()] = cref;
+            self.variables.items(.proof)[lit.variable()] = proof;
+
             try self.vsids.setState(lit.variable(), lbool.init(lit.sign()));
         }
 
@@ -507,7 +484,7 @@ pub fn Solver(comptime ProofManager: type) type {
             var lit = self.assignation_queue.pop();
             try std.testing.expect(self.value(lit) == .ltrue);
 
-            var cref = self.variables.items[lit.variable()].state.?.reason;
+            var cref = self.reasonOf(lit.variable());
 
             if (cref != null) {
                 self.clause_db.decrLock(cref.?);
@@ -516,7 +493,9 @@ pub fn Solver(comptime ProofManager: type) type {
                     self.level -= 1;
             }
 
-            self.variables.items[lit.variable()].state = null;
+            // not necessary to deassign `.reason`, `.level` and `.proof`
+            // accessing them in unassigned mode is an undefined behaviour
+            self.variables.items(.value)[lit.variable()] = .lundef;
 
             try self.vsids.setState(lit.variable(), .lundef);
 
@@ -527,22 +506,22 @@ pub fn Solver(comptime ProofManager: type) type {
             self.propagation_queue.clearRetainingCapacity();
             self.lbd_stats.clear();
             self.stats.addRestart();
-            while (true) {
-                if (self.lastAssignation()) |lit| {
-                    if (self.levelOf(lit.variable()) == 0)
-                        break;
+            while (self.lastAssignation()) |lit| {
+                if (self.levelOf(lit.variable()) == 0)
+                    break;
 
-                    _ = try self.dequeueAssignation();
-                } else break;
+                _ = try self.dequeueAssignation();
             }
         }
 
+        /// backjump using a learned expression and a proof of it
         pub fn backjump(self: *Self, learned: []Lit, proof: Proof) !void {
             var lbd = try self.lbd_stats.getLBD(self, learned);
             try self.lbd_stats.append(lbd, learned.len);
 
             var max_level = self.levelOf(learned[0].variable());
 
+            // search the backtracking levels and index
             var level: usize = 0;
             var ilevel: usize = 0;
             for (0.., learned) |i, lit| {
@@ -554,8 +533,10 @@ pub fn Solver(comptime ProofManager: type) type {
                 }
             }
 
+            // set a variable at backtracking level at index 1
             if (learned.len >= 2) std.mem.swap(Lit, &learned[1], &learned[ilevel]);
 
+            // backjump
             while (self.lastAssignation()) |lit| {
                 if (self.levelOf(lit.variable()) <= level)
                     break;
@@ -563,6 +544,7 @@ pub fn Solver(comptime ProofManager: type) type {
                 _ = try self.dequeueAssignation();
             }
 
+            // two case: the clause is of size `1` (direct assign) or `> 1` (use watchers)
             if (learned.len == 1) {
                 try self.mkAssignation(learned[0], null, proof);
             } else {
@@ -643,9 +625,9 @@ pub fn Solver(comptime ProofManager: type) type {
 
         fn getLitWatchers(self: *Self, lit: Lit) *std.ArrayList(Watcher(ClauseRef)) {
             if (lit.sign()) {
-                return &self.variables.items[lit.variable()].pos_watchers;
+                return &self.variables.items(.pos_watchers)[lit.variable()];
             } else {
-                return &self.variables.items[lit.variable()].neg_watchers;
+                return &self.variables.items(.neg_watchers)[lit.variable()];
             }
         }
 
@@ -690,7 +672,7 @@ pub fn Solver(comptime ProofManager: type) type {
                 .propagation_queue = std.ArrayList(Lit).init(allocator),
                 .assignation_queue = std.ArrayList(Lit).init(allocator),
                 .final_conflict = std.ArrayList(Lit).init(allocator),
-                .variables = std.ArrayList(VarData(ClauseRef, Proof)).init(allocator),
+                .variables = std.MultiArrayList(VarData(ClauseRef, Proof)){},
                 .vsids = VSIDS.init(allocator),
                 .proof_manager = pm,
 
@@ -713,31 +695,34 @@ pub fn Solver(comptime ProofManager: type) type {
         pub fn garbadgeCollect(self: *Self, factor: f64) !void {
             self.stats.addGC();
 
-            try self.clause_db.garbadgeCollect(factor);
-
             if (self.verbose >= 1) {
-                std.debug.print("c {}  ", .{@as(usize, @intFromFloat(self.lbd_stats.mean_size))});
-                std.debug.print("{}  ", .{self.clause_db.len_learned()});
+                std.debug.print("c mean_sz: {}  ", .{@as(usize, @intFromFloat(self.lbd_stats.mean_size))});
+                std.debug.print("learned: {}  ", .{self.clause_db.len_learned()});
                 self.stats.print(self.progressEstimate());
             }
 
-            for (self.variables.items) |*var_data| {
+            try self.clause_db.garbadgeCollect(factor);
+
+            for (self.variables.items(.pos_watchers)) |*watchers| {
                 var i: usize = 0;
 
-                while (i < var_data.pos_watchers.items.len) {
-                    var cref = var_data.pos_watchers.items[i].cref;
+                while (i < watchers.items.len) {
+                    var cref = watchers.items[i].cref;
                     if (self.clause_db.is_free(cref)) {
-                        _ = var_data.pos_watchers.swapRemove(i);
+                        _ = watchers.swapRemove(i);
                     } else {
                         i += 1;
                     }
                 }
+            }
 
-                i = 0;
-                while (i < var_data.neg_watchers.items.len) {
-                    var cref = var_data.neg_watchers.items[i].cref;
+            for (self.variables.items(.neg_watchers)) |*watchers| {
+                var i: usize = 0;
+
+                while (i < watchers.items.len) {
+                    var cref = watchers.items[i].cref;
                     if (self.clause_db.is_free(cref)) {
-                        _ = var_data.neg_watchers.swapRemove(i);
+                        _ = watchers.swapRemove(i);
                     } else {
                         i += 1;
                     }
@@ -756,18 +741,21 @@ pub fn Solver(comptime ProofManager: type) type {
 
             self.seen.deinit();
 
-            for (self.variables.items) |*var_data| {
-                var_data.pos_watchers.deinit();
-                var_data.neg_watchers.deinit();
+            for (self.variables.items(.pos_watchers)) |*w| {
+                w.deinit();
             }
 
-            self.variables.deinit();
+            for (self.variables.items(.neg_watchers)) |*w| {
+                w.deinit();
+            }
+
+            self.variables.deinit(self.allocator);
             self.clause_db.deinit();
         }
 
         /// create a new variable and initialize all it's states
         pub fn addVariable(self: *Self) SolverError!u31 {
-            var new_var_usize = self.variables.items.len;
+            var new_var_usize = self.variables.len;
 
             if (new_var_usize != (new_var_usize & ((2 << 31) - 1))) {
                 return error.TooManyVariables;
@@ -776,12 +764,15 @@ pub fn Solver(comptime ProofManager: type) type {
             var new_var: Variable = @truncate(new_var_usize);
 
             var new_var_data = VarData(ClauseRef, Proof){
-                .state = null,
+                .level = null,
+                .proof = null,
+                .reason = null,
+                .value = .lundef,
                 .pos_watchers = std.ArrayList(Watcher(ClauseRef)).init(self.allocator),
                 .neg_watchers = std.ArrayList(Watcher(ClauseRef)).init(self.allocator),
             };
 
-            try self.variables.append(new_var_data);
+            try self.variables.append(self.allocator, new_var_data);
             try self.vsids.addVariable();
 
             return new_var;
@@ -860,25 +851,28 @@ pub fn Solver(comptime ProofManager: type) type {
                 );
             }
 
-            //index = 1;
-            //minimize_loop: while (index < self.analyze_result.items.len) {
-            //    var v = self.analyze_result.items[index].variable();
+            // if Proof is equal to void, then their is no proof generation (it is possible to minimize clauses)
+            //if (std.meta.eql(Proof, void)) {
+            //    index = 1;
+            //    minimize_loop: while (index < self.analyze_result.items.len) {
+            //        var v = self.analyze_result.items[index].variable();
 
-            //    var reason = self.reasonOf(v) orelse {
-            //        index += 1;
-            //        continue;
-            //    };
-
-            //    var clause = self.clause_db.borrow(reason);
-
-            //    for (clause.expr) |l| {
-            //        if (!self.seen.inSet(l.variable())) {
+            //        var reason = self.reasonOf(v) orelse {
             //            index += 1;
-            //            continue :minimize_loop;
-            //        }
-            //    }
+            //            continue;
+            //        };
 
-            //    _ = self.analyze_result.swapRemove(index);
+            //        var clause = self.clause_db.borrow(reason);
+
+            //        for (clause.expr) |l| {
+            //            if (!self.seen.inSet(l.variable())) {
+            //                index += 1;
+            //                continue :minimize_loop;
+            //            }
+            //        }
+
+            //        _ = self.analyze_result.swapRemove(index);
+            //    }
             //}
 
             return self.analyze_result.items;

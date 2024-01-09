@@ -281,7 +281,7 @@ pub fn ClauseDB(comptime P: type) type {
             for (learned_ref.items) |cref| {
                 var clause = self.borrow(cref);
 
-                var delete = i < limit; // and clause.stats.Learned.lbd >= 3;
+                var delete = i < limit and clause.stats.Learned.lbd >= 3;
 
                 if (clause.lock == 0 and delete) {
                     self.learned_clauses.free(cref.id);

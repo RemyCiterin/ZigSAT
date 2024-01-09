@@ -73,7 +73,7 @@ pub fn parse(self: anytype, text: []u8) !void {
 
             var variable = if (lit > 0) lit else -lit;
 
-            while (self.variables.items.len <= variable) {
+            while (self.variables.len <= variable) {
                 _ = try self.addVariable();
             }
 
