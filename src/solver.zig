@@ -17,10 +17,6 @@ const Lit = @import("lit.zig").Lit;
 const ClauseDB = @import("clause.zig").ClauseDB;
 const Clause = @import("clause.zig").Clause;
 
-// import theory solver to reason about theory like
-// uninterpreted functions, linear arithmetic...
-const TSolver = @import("theory_solver.zig").TSolver;
-
 const generateClause = @import("lit.zig").generateClause;
 
 /// when a clause watch a variable (the variable is one of the two
@@ -31,31 +27,15 @@ pub fn Watcher(comptime ClauseRef: type) type {
     return struct { cref: ClauseRef, blocker: Lit };
 }
 
-const Variable = @import("lit.zig").Variable;
-pub const variableToUsize = @import("lit.zig").variableToUsize;
-
-/// all the data of a variable store by the solver
-fn VarData(comptime ClauseRef: type, comptime P: type) type {
+pub fn TClause(comptime Proof: type) type {
     return struct {
-        /// current level of assignation of the variable (if assigned)
-        level: ?u32,
-
-        /// current value of assignation of the variable
-        value: lbool,
-
-        /// reason of assignation of the variable (if assigned at a level > 0, and not a decision variable)
-        reason: ?ClauseRef,
-
-        /// proof of assignation of the variable (if assigned a level 0)
-        proof: ?P,
-
-        /// the list of all the watchers of the literal `Lit.init(variable, true)`
-        pos_watchers: std.ArrayList(Watcher(ClauseRef)),
-
-        /// the list of all the watchers of the literal `Lit.init(variable, false)`
-        neg_watchers: std.ArrayList(Watcher(ClauseRef)),
+        expr: []Lit,
+        proof: Proof,
     };
 }
+
+const Variable = @import("lit.zig").Variable;
+pub const variableToUsize = @import("lit.zig").variableToUsize;
 
 pub const SolverStats = struct {
     restart: usize,
@@ -108,20 +88,132 @@ pub const SolverStats = struct {
     }
 };
 
-pub fn Solver(comptime ProofManager: type) type {
+pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
     comptime {
         @import("trait.zig").Trait(ProofManager, .{
-            .{ "Proof", type },
-            .{ "addAxiom", fn (*ProofManager, []Lit) void },
-            .{ "initResolution", fn (*ProofManager, ProofManager.Proof) void },
-            .{ "pushResolutionStep", fn (*ProofManager, Variable, ProofManager.Proof) void },
-            .{ "finalizeResolution", fn (*ProofManager) ProofManager.Proof },
+            .{
+                .name = "Proof",
+                .type = type,
+            },
+            .{
+                .name = "addAxiom",
+                .type = fn (*ProofManager, []Lit) void,
+            },
+            .{
+                .name = "initResolution",
+                .type = fn (*ProofManager, ProofManager.Proof) void,
+            },
+            .{
+                .name = "pushResolutionStep",
+                .type = fn (*ProofManager, Variable, ProofManager.Proof) void,
+            },
+            .{
+                .name = "finalizeResolution",
+                .type = fn (*ProofManager) ProofManager.Proof,
+            },
+        });
+
+        @import("trait.zig").Trait(TSolver, .{
+            .{ .name = "pop", .type = fn (*TSolver) void, .doc = 
+            \\`pop` have the effect to pop a backtracking point to the tsolver:
+            \\all the assignations since the last call to `push` must be deassigned
+            },
+            .{ .name = "push", .type = fn (*TSolver) void, .doc = 
+            \\`push` have the effect of pushing a backtracking point to the theory solver
+            },
+            .{ .name = "assign", .type = fn (*TSolver, Lit) void, .doc = 
+            \\assign a value of a literal in the solver, we must use `pop` to unassign it
+            },
+            .{ .name = "weakPropagate", .type = fn (*TSolver) ?Lit, .doc = 
+            \\`weakPropagate` take as input a solver state and return
+            \\a literal propagated by the theory, in particular if this
+            \\literal is true in the current assignment then the SAT
+            \\solver will propagate it, and if the literal is false the
+            \\SAT solver will raise a theory conflict and backtrack
+            },
+            .{ .name = "reason", .type = fn (*TSolver, Variable) TClause(ProofManager.Proof), .doc = 
+            \\`reason(v)` must be called if a previous call to `weakPropagate`
+            \\returned `l := Lit.init(v, b)`, in this case the return clause
+            \\is the reason for the assignment of `v` and is of the form
+            \\`l_1 ... l_n` with one of `l_i` equal to `l` and the other
+            \\assigned to false
+            },
+            .{ .name = "check", .type = fn (*TSolver) ?TClause(ProofManager.Proof), .doc = 
+            \\check that the current model is true and return a theory unsat core if not
+            },
         });
     }
 
     return struct {
         pub const Proof = ProofManager.Proof;
         pub const ClauseRef = ClauseDB(Proof).ClauseRef;
+
+        pub const SmtClause = union(enum) {
+            sat: ClauseRef,
+            theory: TClause(Proof),
+
+            pub fn expr(self: @This(), db: *ClauseDB(Proof)) []Lit {
+                return switch (self) {
+                    .sat => |cref| db.borrow(cref).expr,
+                    .theory => |c| c.expr,
+                };
+            }
+
+            pub fn proof(self: @This(), db: *ClauseDB(Proof)) Proof {
+                return switch (self) {
+                    .sat => |cref| db.borrow(cref).proof,
+                    .theory => |c| c.proof,
+                };
+            }
+
+            pub fn incrLock(self: @This(), db: *ClauseDB(Proof)) void {
+                switch (self) {
+                    .sat => |cref| db.incrLock(cref),
+                    else => {},
+                }
+            }
+
+            pub fn decrLock(self: @This(), db: *ClauseDB(Proof)) void {
+                switch (self) {
+                    .sat => |cref| db.decrLock(cref),
+                    else => {},
+                }
+            }
+
+            pub fn incrActivity(self: @This(), db: *ClauseDB(Proof)) void {
+                switch (self) {
+                    .sat => |cref| db.incrActivity(cref),
+                    else => {},
+                }
+            }
+        };
+
+        /// all the data of a variable store by the solver
+        const VarData = struct {
+            /// current level of assignation of the variable (if assigned)
+            level: ?u32,
+
+            /// current value of assignation of the variable
+            value: lbool,
+
+            /// reason of assignation of the variable (if assigned at a level > 0, and not a decision variable)
+            reason: ?SmtClause,
+
+            /// position in the assignation_queue: used for safety check (interactions with tsolver)
+            position: usize,
+
+            /// in this case the theory solver give a reason in a lazy way
+            lazy_reason: bool,
+
+            /// proof of assignation of the variable (if assigned a level 0)
+            proof: ?Proof,
+
+            /// the list of all the watchers of the literal `Lit.init(variable, true)`
+            pos_watchers: std.ArrayList(Watcher(ClauseRef)),
+
+            /// the list of all the watchers of the literal `Lit.init(variable, false)`
+            neg_watchers: std.ArrayList(Watcher(ClauseRef)),
+        };
 
         /// set of all the assignation of the solver, usefull for backtracking,
         /// if a literal `lit` is in the assignation queue, and `self.reasonOf(lit.variable()) != null`
@@ -137,10 +229,13 @@ pub fn Solver(comptime ProofManager: type) type {
         clause_db: ClauseDB(Proof),
 
         /// set of variables and variables data
-        variables: std.MultiArrayList(VarData(ClauseRef, Proof)),
+        variables: std.MultiArrayList(VarData),
 
         /// use and compute lbd
         lbd_stats: LBDstats,
+
+        /// theory solver
+        tsolver: TSolver,
 
         /// result of the final analysis
         final_conflict: std.ArrayList(Lit),
@@ -208,16 +303,63 @@ pub fn Solver(comptime ProofManager: type) type {
             return true;
         }
 
-        /// propagate all the assigned variables and see if their is a conflict
-        fn propagate(self: *Self) !?ClauseRef {
-            while (self.propagation_queue.items.len > 0) {
-                self.stats.addPropagation();
+        fn theoryPropagate(self: *Self) !?TClause(Proof) {
+            while (true) {
+                if (self.tsolver.weakPropagate()) |lit| {
+                    if (self.value(lit) == .ltrue) continue;
+                    if (self.value(lit) == .lfalse) {
+                        var reason = self.tsolver.reason(lit.variable());
+                        try std.testing.expect(reason.expr.len >= 1);
 
-                if (try self.propagateLit(self.propagation_queue.pop())) |cref| {
-                    return cref;
+                        for (reason.expr) |l|
+                            try std.testing.expect(self.value(l) == .lfalse);
+
+                        return reason;
+                    }
+
+                    if (self.level == 0) {
+                        var reason = self.tsolver.reason(lit.variable());
+                        self.proof_manager.initResolution(reason.proof);
+
+                        for (reason.expr) |l| {
+                            var v = l.variable();
+                            if (v == lit.variable()) {
+                                if (!l.equals(lit)) @panic("TSolver error");
+                                continue;
+                            }
+                            if (self.value(l) != .lfalse) @panic("TSolver error");
+                            self.proof_manager.pushResolutionStep(v, self.proofOf(v).?);
+                        }
+
+                        var proof = self.proof_manager.finalizeResolution();
+                        try self.mkAssignation(lit, null, proof, false);
+                    } else {
+                        try self.mkAssignation(lit, null, null, true);
+                    }
+
+                    continue;
                 }
+
+                return null;
             }
-            return null;
+        }
+
+        /// propagate all the assigned variables and see if their is a conflict
+        fn propagate(self: *Self) !?SmtClause {
+            while (true) {
+                while (self.propagation_queue.items.len > 0) {
+                    self.stats.addPropagation();
+
+                    if (try self.propagateLit(self.propagation_queue.pop())) |cref| {
+                        return .{ .sat = cref };
+                    }
+                }
+
+                if (try self.theoryPropagate()) |conf| return .{ .theory = conf };
+                if (self.propagation_queue.items.len > 0) continue;
+
+                return null;
+            }
         }
 
         /// use the watcher lists to propagate the assignation of a variable inside the solver
@@ -284,7 +426,7 @@ pub fn Solver(comptime ProofManager: type) type {
                     proof = self.proof_manager.finalizeResolution();
                 }
 
-                try self.mkAssignation(clause.expr[0], if (self.level == 0) null else cref, proof);
+                try self.mkAssignation(clause.expr[0], if (self.level == 0) null else cref, proof, false);
                 i += 1;
             }
 
@@ -297,10 +439,37 @@ pub fn Solver(comptime ProofManager: type) type {
             return self.variables.items(.level)[variable].?;
         }
 
+        /// return the level of assignation of an assigned variable
+        /// undefined behaviour if the variable is not assigned
+        pub fn positionOf(self: Self, variable: Variable) usize {
+            return self.variables.items(.position)[variable];
+        }
+
         /// return the reason of assignation of an assigned variables:
         /// null if the variable is a decision variable of a variable assigned at level 0
         /// undefined behaviour if the variable is not assigned
-        pub fn reasonOf(self: Self, variable: Variable) ?ClauseRef {
+        pub fn reasonOf(self: *Self, variable: Variable) ?SmtClause {
+            if (self.variables.items(.lazy_reason)[variable]) {
+                self.variables.items(.lazy_reason)[variable] = false;
+                var reason = self.tsolver.reason(variable);
+
+                for (0.., reason.expr) |i, lit| {
+                    if (lit.variable() == variable) {
+                        std.mem.swap(Lit, &reason.expr[0], &reason.expr[i]);
+                    } else {
+                        var val = self.value(lit);
+                        std.testing.expect(val == .lfalse) catch @panic("tsolver error");
+                        std.testing.expect(
+                            self.positionOf(lit.variable()) < self.positionOf(variable),
+                        ) catch @panic("tsolver error");
+                    }
+                }
+
+                if (reason.expr[0].variable() != variable) @panic("tsolver error");
+
+                self.variables.items(.reason)[variable] = .{ .theory = reason };
+            }
+
             return self.variables.items(.reason)[variable];
         }
 
@@ -390,13 +559,19 @@ pub fn Solver(comptime ProofManager: type) type {
         }
 
         /// the expression is borrow by the caller, the caller must deinit it
-        pub fn addClause(self: *Self, expr: *std.ArrayList(Lit)) !void { // []Lit) !void {
+        pub fn addClause(self: *Self, expr: *std.ArrayList(Lit)) !void {
             try std.testing.expect(self.level == 0);
+
+            for (expr.items) |lit| {
+                while (self.variables.len <= lit.variable())
+                    _ = try self.addVariable();
+            }
 
             if (self.is_unsat) |_| {
                 // the formula is already unsat
                 return;
             }
+
             if (try generateClause(expr))
                 return;
 
@@ -421,11 +596,10 @@ pub fn Solver(comptime ProofManager: type) type {
             proof = self.proof_manager.finalizeResolution();
 
             if (expr.items.len == 1) {
-                try self.mkAssignation(expr.items[0], null, proof);
+                try self.mkAssignation(expr.items[0], null, proof, false);
                 if (try self.propagate()) |conf| {
-                    var clause = self.clause_db.borrow(conf);
-                    self.proof_manager.initResolution(clause.proof);
-                    for (clause.expr) |lit| {
+                    self.proof_manager.initResolution(conf.proof(&self.clause_db));
+                    for (conf.expr(&self.clause_db)) |lit| {
                         self.proof_manager.pushResolutionStep(
                             lit.variable(),
                             self.proofOf(lit.variable()).?,
@@ -452,7 +626,7 @@ pub fn Solver(comptime ProofManager: type) type {
             return self.assignation_queue.items[l - 1];
         }
 
-        fn mkAssignation(self: *Self, lit: Lit, cref: ?ClauseRef, proof: ?Proof) !void {
+        fn mkAssignation(self: *Self, lit: Lit, cref: ?ClauseRef, proof: ?Proof, treason: bool) !void {
             if (cref) |c| {
                 var clause = self.clause_db.borrow(c);
                 for (clause.expr) |l|
@@ -472,32 +646,49 @@ pub fn Solver(comptime ProofManager: type) type {
                 self.clause_db.incrLock(cref.?);
             }
 
+            self.variables.items(.lazy_reason)[lit.variable()] = treason;
+            self.variables.items(.reason)[lit.variable()] = if (cref) |c| .{ .sat = c } else null;
+
+            self.variables.items(.position)[lit.variable()] = self.assignation_queue.items.len;
+
             self.variables.items(.value)[lit.variable()] = lbool.init(lit.sign());
             self.variables.items(.level)[lit.variable()] = self.level;
-            self.variables.items(.reason)[lit.variable()] = cref;
             self.variables.items(.proof)[lit.variable()] = proof;
 
+            // assign the literal in the variable decision heuristic
             try self.vsids.setState(lit.variable(), lbool.init(lit.sign()));
+
+            // assign the literal in the theory solver
+            self.tsolver.assign(lit);
         }
 
         fn dequeueAssignation(self: *Self) !Lit {
             var lit = self.assignation_queue.pop();
             try std.testing.expect(self.value(lit) == .ltrue);
 
-            var cref = self.reasonOf(lit.variable());
+            var v = lit.variable();
+            try std.testing.expect(self.levelOf(v) > 0);
 
-            if (cref != null) {
-                self.clause_db.decrLock(cref.?);
+            if (self.variables.items(.reason)[v]) |smt_clause| {
+                switch (smt_clause) {
+                    .sat => |cref| self.clause_db.decrLock(cref),
+                    .theory => |tclause| {
+                        self.allocator.free(tclause.expr);
+                        // TODO release `tclause.proof`
+                    },
+                }
             } else {
-                if (self.level != 0)
+                if (self.level != 0 and !self.variables.items(.lazy_reason)[v]) {
+                    self.tsolver.pop();
                     self.level -= 1;
+                }
             }
 
             // not necessary to deassign `.reason`, `.level` and `.proof`
             // accessing them in unassigned mode is an undefined behaviour
-            self.variables.items(.value)[lit.variable()] = .lundef;
+            self.variables.items(.value)[v] = .lundef;
 
-            try self.vsids.setState(lit.variable(), .lundef);
+            try self.vsids.setState(v, .lundef);
 
             return lit;
         }
@@ -546,10 +737,10 @@ pub fn Solver(comptime ProofManager: type) type {
 
             // two case: the clause is of size `1` (direct assign) or `> 1` (use watchers)
             if (learned.len == 1) {
-                try self.mkAssignation(learned[0], null, proof);
+                try self.mkAssignation(learned[0], null, proof, false);
             } else {
                 var new_clause = try self.addLearnedClause(learned, lbd, proof);
-                try self.mkAssignation(learned[0], new_clause, null);
+                try self.mkAssignation(learned[0], new_clause, null, false);
                 self.clause_db.incrActivity(new_clause);
             }
 
@@ -566,18 +757,18 @@ pub fn Solver(comptime ProofManager: type) type {
             if (self.is_unsat) |proof| return proof;
             while (true) {
                 if (try self.propagate()) |cref| {
-                    if (self.level == 0) {
-                        var clause = self.clause_db.borrow(cref);
-                        self.proof_manager.initResolution(clause.proof);
+                    if (self.level == 0 or cref.expr(&self.clause_db).len == 0) {
+                        self.proof_manager.initResolution(cref.proof(&self.clause_db));
 
-                        for (clause.expr) |lit| {
+                        for (cref.expr(&self.clause_db)) |lit| {
                             self.proof_manager.pushResolutionStep(
                                 lit.variable(),
                                 self.proofOf(lit.variable()).?,
                             );
                         }
 
-                        return self.proof_manager.finalizeResolution();
+                        self.is_unsat = self.proof_manager.finalizeResolution();
+                        return self.is_unsat;
                     }
 
                     self.stats.addConflict();
@@ -614,11 +805,13 @@ pub fn Solver(comptime ProofManager: type) type {
                         }
                     }
 
+                    // TODO check theory validity
                     if (decision == null)
                         decision = self.vsids.mkDecision() orelse return null;
 
                     self.level += 1;
-                    try self.mkAssignation(decision.?, null, null);
+                    self.tsolver.push();
+                    try self.mkAssignation(decision.?, null, null, false);
                 }
             }
         }
@@ -666,15 +859,16 @@ pub fn Solver(comptime ProofManager: type) type {
         }
 
         /// init a new solver, call `deinit()` to free it's memory
-        pub fn init(pm: ProofManager, allocator: std.mem.Allocator) !Self {
+        pub fn init(pm: ProofManager, tsolver: TSolver, allocator: std.mem.Allocator) !Self {
             return Self{
                 .clause_db = ClauseDB(Proof).init(allocator),
                 .propagation_queue = std.ArrayList(Lit).init(allocator),
                 .assignation_queue = std.ArrayList(Lit).init(allocator),
                 .final_conflict = std.ArrayList(Lit).init(allocator),
-                .variables = std.MultiArrayList(VarData(ClauseRef, Proof)){},
+                .variables = std.MultiArrayList(VarData){},
                 .vsids = VSIDS.init(allocator),
                 .proof_manager = pm,
+                .tsolver = tsolver,
 
                 .seen = IntSet(Variable, variableToUsize).init(allocator),
                 .analyze_result = std.ArrayList(Lit).init(allocator),
@@ -763,10 +957,12 @@ pub fn Solver(comptime ProofManager: type) type {
 
             var new_var: Variable = @truncate(new_var_usize);
 
-            var new_var_data = VarData(ClauseRef, Proof){
+            var new_var_data = VarData{
                 .level = null,
                 .proof = null,
                 .reason = null,
+                .lazy_reason = false,
+                .position = 0,
                 .value = .lundef,
                 .pos_watchers = std.ArrayList(Watcher(ClauseRef)).init(self.allocator),
                 .neg_watchers = std.ArrayList(Watcher(ClauseRef)).init(self.allocator),
@@ -778,14 +974,15 @@ pub fn Solver(comptime ProofManager: type) type {
             return new_var;
         }
 
-        pub fn analyze(self: *Self, conf: ClauseRef) ![]Lit {
+        /// return a conflic clause with exactly one literal at maximum level at index 0
+        pub fn analyze(self: *Self, conf: SmtClause) ![]Lit {
             self.analyze_result.clearRetainingCapacity();
             self.seen.clear();
 
             // search the maximum level of assignation of the conflict
             var level: usize = 0;
 
-            for (self.clause_db.borrow(conf).expr) |lit| {
+            for (conf.expr(&self.clause_db)) |lit| {
                 try std.testing.expect(self.value(lit) == .lfalse);
                 var lit_level = self.levelOf(lit.variable());
 
@@ -793,25 +990,30 @@ pub fn Solver(comptime ProofManager: type) type {
             }
 
             try self.analyze_result.append(Lit.init(0, true));
-            self.proof_manager.initResolution(self.clause_db.borrow(conf).proof);
+            self.proof_manager.initResolution(conf.proof(&self.clause_db));
 
             var IP_counter: usize = 0; // number of implication points of the current clause
             var index = self.assignation_queue.items.len - 1;
-            var cref: ClauseRef = conf;
+            var cref: SmtClause = conf;
 
             while (true) {
-                var clause = self.clause_db.borrow(cref);
-                self.clause_db.incrActivity(cref);
+                switch (cref) {
+                    .sat => {
+                        var clause = self.clause_db.borrow(cref.sat);
+                        cref.incrActivity(&self.clause_db);
 
-                switch (clause.stats) {
-                    .Learned => |*lcs| {
-                        var lbd = try self.lbd_stats.getLBD(self, clause.expr);
-                        if (lbd < lcs.lbd) lcs.lbd = lbd;
+                        switch (clause.stats) {
+                            .Learned => |*lcs| {
+                                var lbd = try self.lbd_stats.getLBD(self, clause.expr);
+                                if (lbd < lcs.lbd) lcs.lbd = lbd;
+                            },
+                            else => {},
+                        }
                     },
                     else => {},
                 }
 
-                for (clause.expr) |lit| {
+                for (cref.expr(&self.clause_db)) |lit| {
                     // in this case, `self.reasonOf(lit.variable()) == cref`
                     if (self.value(lit) == .ltrue) continue;
 
@@ -847,33 +1049,31 @@ pub fn Solver(comptime ProofManager: type) type {
                 cref = self.reasonOf(pivot.variable()).?;
                 self.proof_manager.pushResolutionStep(
                     pivot.variable(),
-                    self.clause_db.borrow(cref).proof,
+                    cref.proof(&self.clause_db),
                 );
             }
 
             // if Proof is equal to void, then their is no proof generation (it is possible to minimize clauses)
-            //if (std.meta.eql(Proof, void)) {
-            //    index = 1;
-            //    minimize_loop: while (index < self.analyze_result.items.len) {
-            //        var v = self.analyze_result.items[index].variable();
+            if (std.meta.eql(Proof, void)) {
+                index = 1;
+                minimize_loop: while (index < self.analyze_result.items.len) {
+                    var v = self.analyze_result.items[index].variable();
 
-            //        var reason = self.reasonOf(v) orelse {
-            //            index += 1;
-            //            continue;
-            //        };
+                    var reason = self.reasonOf(v) orelse {
+                        index += 1;
+                        continue;
+                    };
 
-            //        var clause = self.clause_db.borrow(reason);
+                    for (reason.expr(&self.clause_db)) |l| {
+                        if (!self.seen.inSet(l.variable())) {
+                            index += 1;
+                            continue :minimize_loop;
+                        }
+                    }
 
-            //        for (clause.expr) |l| {
-            //            if (!self.seen.inSet(l.variable())) {
-            //                index += 1;
-            //                continue :minimize_loop;
-            //            }
-            //        }
-
-            //        _ = self.analyze_result.swapRemove(index);
-            //    }
-            //}
+                    _ = self.analyze_result.swapRemove(index);
+                }
+            }
 
             return self.analyze_result.items;
         }

@@ -1,5 +1,6 @@
 const std = @import("std");
 const Solver = @import("solver.zig").Solver;
+const TClause = @import("solver.zig").TClause;
 const Lit = @import("lit.zig").Lit;
 
 pub const EmptyPM = struct {
@@ -38,16 +39,29 @@ pub const EmptyPM = struct {
     }
 };
 
-pub fn main() !void {
-    comptime {
-        @import("trait.zig").Trait(EmptyPM, .{
-            .{ "Proof", type },
-            .{ "addAxiom", fn (*EmptyPM, []Lit) void },
-            .{ "initResolution", fn (*EmptyPM, EmptyPM.Proof) void },
-            .{ "pushResolutionStep", fn (*EmptyPM, @import("lit.zig").Variable, EmptyPM.Proof) void },
-            .{ "finalizeResolution", fn (*EmptyPM) EmptyPM.Proof },
-        });
+pub const EmptyTSolver = struct {
+    const Self = @This();
+
+    pub fn pop(_: *Self) void {}
+
+    pub fn push(_: *Self) void {}
+
+    pub fn assign(_: *Self, _: Lit) void {}
+
+    pub fn weakPropagate(_: *Self) ?Lit {
+        return null;
     }
+
+    pub fn reason(_: *Self, _: @import("lit.zig").Variable) TClause(void) {
+        unreachable;
+    }
+
+    pub fn check(_: *Self) ?TClause(void) {
+        return null;
+    }
+};
+
+pub fn main() !void {
     //var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = false }){};
     //const allocator = gpa.allocator();
     //defer {
@@ -59,7 +73,7 @@ pub fn main() !void {
     //var allocator = arena.allocator();
 
     const ProofManager = EmptyPM;
-    var solver = try Solver(ProofManager).init(ProofManager{}, allocator);
+    var solver = try Solver(ProofManager, EmptyTSolver).init(.{}, .{}, allocator);
     solver.verbose = 1;
     //defer solver.deinit();
 
@@ -71,7 +85,7 @@ pub fn main() !void {
 
     //const file_path =
     //    try std.fmt.allocPrint(allocator, "test.cnf", .{});
-    std.debug.print("c {s}\n", .{file_path.items});
+    std.debug.print("c start parsing {s}\n", .{file_path.items});
     defer file_path.deinit();
 
     const file = try std.fs.cwd().openFile(file_path.items, .{});
@@ -87,6 +101,7 @@ pub fn main() !void {
     try std.testing.expect(bytes_read == buffer.len);
 
     try @import("parse.zig").parse(&solver, buffer);
+    std.debug.print("c start resolution {s}\n", .{file_path.items});
 
     const assumptions: [0]Lit = undefined;
     var b = try solver.cdcl(assumptions[0..]);

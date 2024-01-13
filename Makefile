@@ -7,6 +7,12 @@ profile: build
 	rm -rf perf.data
 	rm -rf perf.data.old
 
+profile_minisat:
+	time perf record --call-graph=dwarf -- ./test-generator/minisat/core/minisat $(TEST)
+	perf report
+	rm -rf perf.data
+	rm -rf perf.data.old
+
 # measure the number of cache misses
 stats:
 	perf stat -B -e cache-references,cache-misses,cycles,instructions,branches,faults,migrations \
@@ -29,7 +35,7 @@ build:
 	zig build -Doptimize=ReleaseFast
 
 run:
-	time zig-out/bin/ZigSat test.cnf
+	time zig-out/bin/ZigSat $(TEST)
 
 test:
 	zig test src/solver.zig
