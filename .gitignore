@@ -1,1 +1,3 @@
 test-generator/
+zig-out/
+zig-cache/
