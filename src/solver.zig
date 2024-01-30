@@ -37,9 +37,38 @@ pub fn TClause(comptime Proof: type) type {
 const Variable = @import("lit.zig").Variable;
 pub const variableToUsize = @import("lit.zig").variableToUsize;
 
+pub const SimplifyHeuristic = struct {
+    /// simplify every 2000 + 500 * x conflicts
+    fuel: usize,
+
+    /// num of previous simplification
+    num: usize,
+
+    pub fn init() @This() {
+        return .{
+            .fuel = 0,
+            .num = 0,
+        };
+    }
+
+    pub fn addConflict(self: *@This()) void {
+        if (self.fuel > 0) self.fuel -= 1;
+    }
+
+    pub fn addSimplify(self: *@This()) void {
+        self.fuel = 2000 + 100 * self.num;
+        self.num += 1;
+    }
+
+    pub fn maySimplify(self: @This()) bool {
+        return self.fuel == 0;
+    }
+};
+
 pub const SolverStats = struct {
     restart: usize,
     conflict: usize,
+    simplify: usize,
     gc: usize,
     prop: usize,
 
@@ -47,6 +76,7 @@ pub const SolverStats = struct {
 
     fn init() Self {
         return Self{
+            .simplify = 0,
             .restart = 0,
             .gc = 0,
             .conflict = 0,
@@ -55,8 +85,9 @@ pub const SolverStats = struct {
     }
 
     pub fn print(self: Self, progress: f64) void {
-        std.debug.print("rst: {}  conf: {}  prop: {}  progress: {d:.4}\n", .{
+        std.debug.print("rst: {}  simp: {}  conf: {}  prop: {}  progress: {d:.4}\n", .{
             self.restart,
+            self.simplify,
             self.conflict,
             self.prop,
             progress,
@@ -77,6 +108,10 @@ pub const SolverStats = struct {
 
     pub fn addConflict(self: *Self) void {
         self.conflict += 1;
+    }
+
+    pub fn addSimplify(self: *Self) void {
+        self.simplify += 1;
     }
 
     pub fn numConflict(self: Self) usize {
@@ -251,6 +286,9 @@ pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
 
         /// if true then the solver state is unsat
         is_unsat: ?Proof,
+
+        /// simplification heuristic
+        simplify_h: SimplifyHeuristic = SimplifyHeuristic.init(),
 
         /// current decision level of the solver
         level: u32,
@@ -535,6 +573,9 @@ pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
         }
 
         pub fn simplify(self: *Self) !void {
+            self.simplify_h.addSimplify();
+            self.stats.addSimplify();
+
             try std.testing.expect(self.level == 0);
 
             var learned = self.clause_db.iter_learned();
@@ -753,7 +794,7 @@ pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
             var restart_conflicts: usize = 0;
             try self.restart();
 
-            try self.simplify();
+            if (self.simplify_h.maySimplify()) try self.simplify();
             if (self.is_unsat) |proof| return proof;
             while (true) {
                 if (try self.propagate()) |cref| {
@@ -772,6 +813,7 @@ pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
                     }
 
                     self.stats.addConflict();
+                    self.simplify_h.addConflict();
                     restart_conflicts += 1;
 
                     var num_assign = self.assignation_queue.items.len;
@@ -790,7 +832,7 @@ pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
                         restart_conflicts = 0;
                     }
 
-                    //if (self.level == 0) try self.simplify();
+                    if (self.level == 0 and self.simplify_h.maySimplify()) try self.simplify();
 
                     var decision: ?Lit = null;
 

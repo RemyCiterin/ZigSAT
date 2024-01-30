@@ -1,4 +1,4 @@
-TEST = ./test-generator/BV2/sudoku.cnf # ./test-generator/test.cnf
+TEST = ./test.cnf
 
 # measure the performances of each function calls
 profile: build
