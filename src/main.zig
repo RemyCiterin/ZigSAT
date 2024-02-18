@@ -1,5 +1,5 @@
 const std = @import("std");
-const Solver = @import("solver.zig").Solver;
+pub const Solver = @import("solver.zig").Solver;
 const TClause = @import("solver.zig").TClause;
 const Lit = @import("lit.zig").Lit;
 
@@ -74,8 +74,8 @@ pub fn main() !void {
 
     const ProofManager = EmptyPM;
     var solver = try Solver(ProofManager, EmptyTSolver).init(.{}, .{}, allocator);
+    defer solver.deinit();
     solver.verbose = 1;
-    //defer solver.deinit();
 
     var file_path = std.ArrayList(u8).init(allocator);
 
@@ -103,8 +103,9 @@ pub fn main() !void {
     try @import("parse.zig").parse(&solver, buffer);
     std.debug.print("c start resolution {s}\n", .{file_path.items});
 
-    const assumptions: [0]Lit = undefined;
-    var b = try solver.cdcl(assumptions[0..]);
+    var assumptions = std.ArrayList(Lit).init(allocator);
+    defer assumptions.deinit();
+    var b = try solver.cdcl(assumptions.items);
 
     std.debug.print("c ", .{});
     solver.stats.print(solver.progressEstimate());

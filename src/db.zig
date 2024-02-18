@@ -62,12 +62,12 @@ pub fn DB(comptime T: type) type {
             self.elems.deinit();
         }
 
-        pub fn is_free(self: *Self, id: Id) bool {
+        pub fn isFree(self: Self, id: Id) bool {
             return id.generation != self.generation.items[id.index];
         }
 
         pub fn free(self: *Self, id: Id) void {
-            if (self.is_free(id)) @panic("use of an invalid Id");
+            if (self.isFree(id)) @panic("use of an invalid Id");
             if (!self.allocated.items[id.index]) @panic("already free");
             self.free_list.items[self.free_list_idx] = id.index;
             self.allocated.items[id.index] = false;
@@ -111,8 +111,8 @@ pub fn DB(comptime T: type) type {
         }
 
         // a tmp borrow of a object of the database
-        pub fn borrow(self: *Self, id: Id) *T {
-            if (self.is_free(id)) @panic("use of an invalid Id");
+        pub fn borrow(self: Self, id: Id) *T {
+            if (self.isFree(id)) @panic("use of an invalid Id");
             return &self.elems.items[id.index];
         }
     };

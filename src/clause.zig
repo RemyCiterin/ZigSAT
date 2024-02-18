@@ -32,6 +32,9 @@ pub fn Clause(comptime P: type) type {
         /// watched literals, they change with time
         expr: []Lit,
 
+        /// the allocated capacity of an expression
+        capacicy: usize,
+
         /// the garbadge collector cannot delete a learned clause if lock is strictly positive
         lock: u32,
 
@@ -113,7 +116,8 @@ pub fn ClauseDB(comptime P: type) type {
             var iter = self.initial_clauses.iter();
             while (iter.next()) |id| {
                 var c = self.initial_clauses.borrow(id);
-                self.allocator.free(c.expr);
+                var expr = c.expr[0..c.capacicy];
+                self.allocator.free(expr);
             }
 
             self.initial_clauses.deinit();
@@ -138,64 +142,63 @@ pub fn ClauseDB(comptime P: type) type {
             }
         }
 
-        pub fn is_free(self: *Self, cref: ClauseRef) bool {
+        pub fn isFree(self: *Self, cref: ClauseRef) bool {
             if (cref.learned) {
-                return self.learned_clauses.is_free(cref.id);
+                return self.learned_clauses.isFree(cref.id);
             } else {
-                return self.initial_clauses.is_free(cref.id);
+                return self.initial_clauses.isFree(cref.id);
             }
         }
 
-        pub fn iter_learned(self: *Self) Iterator {
+        pub fn iterLearned(self: *Self) Iterator {
             return Iterator{ .learned = true, .iter = self.learned_clauses.iter() };
         }
 
-        pub fn iter_initial(self: *Self) Iterator {
+        pub fn iterInitial(self: *Self) Iterator {
             return Iterator{ .learned = false, .iter = self.initial_clauses.iter() };
         }
 
-        pub fn len_learned(self: *Self) usize {
+        pub fn lenLearned(self: *Self) usize {
             return self.learned_clauses.len();
         }
 
-        pub fn len_initial(self: *Self) usize {
+        pub fn lenInitial(self: *Self) usize {
             return self.initial_clauses.len();
         }
 
         /// this function clone the expression
         /// the caller have to dealloc it itself
         pub fn initClause(self: *Self, is_learned: bool, expr: []const Lit, proof: P) !ClauseRef {
-            var new_expr: []Lit = undefined;
             var cref: ClauseRef = undefined;
-            var stats: ClauseStats = undefined;
+            var clause: Clause(P) = .{
+                .capacicy = expr.len,
+                .stats = undefined,
+                .expr = undefined,
+                .proof = proof,
+                .lock = 0,
+            };
 
             if (is_learned) {
-                new_expr = try self.main_arena.allocator().alloc(Lit, expr.len);
+                clause.expr = try self.main_arena.allocator().alloc(Lit, expr.len);
                 cref = ClauseRef{
                     .learned = true,
                     .id = try self.learned_clauses.alloc(undefined),
                 };
 
-                var st = LearnedClauseStats{};
-                stats = ClauseStats{ .Learned = st };
+                clause.stats = ClauseStats{
+                    .Learned = LearnedClauseStats{},
+                };
             } else {
-                new_expr = try self.allocator.alloc(Lit, expr.len);
+                clause.expr = try self.allocator.alloc(Lit, expr.len);
+                clause.stats = ClauseStats.Initial;
                 cref = ClauseRef{
                     .learned = false,
                     .id = try self.initial_clauses.alloc(undefined),
                 };
-
-                stats = ClauseStats.Initial;
             }
 
-            std.mem.copy(Lit, new_expr, expr);
-
-            self.borrow(cref).* = .{
-                .stats = stats,
-                .expr = new_expr,
-                .proof = proof,
-                .lock = 0,
-            };
+            std.mem.copy(Lit, clause.expr, expr);
+            self.borrow(cref).* = clause;
 
             return cref;
         }
@@ -207,7 +210,7 @@ pub fn ClauseDB(comptime P: type) type {
             clause.stats.Learned.activity += self.activity_increment;
 
             if (clause.stats.Learned.activity > 1e20) {
-                var learned = self.iter_learned();
+                var learned = self.iterLearned();
 
                 while (learned.next()) |c| {
                     self.borrow(c).stats.Learned.activity *= 1e-20;
@@ -349,7 +352,7 @@ test "random clause manager test" {
             expr.clearRetainingCapacity();
         }
 
-        var iter = cm.iter_learned();
+        var iter = cm.iterLearned();
         while (iter.next()) |cref| {
             var clause = cm.borrow(cref);
             var act = rnd.random().float(f64);

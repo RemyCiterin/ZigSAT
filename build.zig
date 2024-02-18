@@ -1,40 +1,6 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
-    //const target = b.standardTargetOptions(.{});
-
-    //const optimize = b.standardOptimizeOption(.{});
-
-    //const exe = b.addExecutable(.{
-    //    .name = "ZigSat",
-    //    .root_source_path = "src/main.zig",
-    //    .target = target,
-    //    .optimize = optimize,
-    //});
-
-    //exe.linkLibCpp();
-    //exe.install();
-
-    //const run_cmd = exe.run();
-    //run_cmd.step.dependOn(b.getInstallStep());
-    //if (b.args) |args| {
-    //    run_cmd.addArgs(args);
-    //}
-
-    //const run_step = b.step("run", "Run the app");
-    //run_step.dependOn(&run_cmd.step);
-
-    //const exe_tests = b.addTest("src/main.zig");
-    //exe_tests.setTarget(target);
-    //exe_tests.setBuildMode(mode);
-
-    //const test_step = b.step("test", "Run unit tests");
-    //test_step.dependOn(&exe_tests.step);
-
     const target = b.standardTargetOptions(.{});
 
     // Standard optimization options allow the person running `zig build` to select
@@ -50,6 +16,15 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    const lib = b.addStaticLibrary(.{
+        .name = "ZigSat",
+        .root_source_file = .{ .path = "src/solver.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    b.installArtifact(lib);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -95,4 +70,13 @@ pub fn build(b: *std.Build) void {
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
+
+    const install_docs = b.addInstallDirectory(.{
+        .source_dir = exe.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+
+    const docs_step = b.step("docs", "Copy documentation artifacts to prefix path");
+    docs_step.dependOn(&install_docs.step);
 }

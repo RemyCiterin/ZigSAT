@@ -13,6 +13,14 @@ pub const lbool = enum(u2) {
         }
     }
 
+    pub fn not(self: lbool) lbool {
+        return switch (self) {
+            .ltrue => lbool.lfalse,
+            .lfalse => lbool.ltrue,
+            else => lbool.lundef,
+        };
+    }
+
     pub fn sign(self: lbool) bool {
         switch (self) {
             .ltrue => return true,

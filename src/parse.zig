@@ -126,7 +126,7 @@ test "random clause manager test" {
 
         try std.testing.expect(bytes_read == buffer.len);
 
-        try solver.parse(buffer);
+        try parse(solver, buffer);
 
         var skip_file = false;
         for ("sudoku.cnf", 0..) |c, i| {
