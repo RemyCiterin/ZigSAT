@@ -19,7 +19,7 @@ pub fn build(b: *std.Build) void {
 
     const lib = b.addStaticLibrary(.{
         .name = "ZigSat",
-        .root_source_file = .{ .path = "src/solver.zig" },
+        .root_source_file = .{ .path = "src/api.zig" },
         .target = target,
         .optimize = optimize,
     });
@@ -30,6 +30,7 @@ pub fn build(b: *std.Build) void {
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).
     exe.linkLibCpp();
+    lib.linkLibC();
     b.installArtifact(exe);
 
     // This *creates* a Run step in the build graph, to be executed when another

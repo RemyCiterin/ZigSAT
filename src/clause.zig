@@ -33,7 +33,7 @@ pub fn Clause(comptime P: type) type {
         expr: []Lit,
 
         /// the allocated capacity of an expression
-        capacicy: usize,
+        capacity: usize,
 
         /// the garbadge collector cannot delete a learned clause if lock is strictly positive
         lock: u32,
@@ -113,11 +113,14 @@ pub fn ClauseDB(comptime P: type) type {
 
         /// free it's database but not it's clauses
         pub fn deinit(self: *Self) void {
-            var iter = self.initial_clauses.iter();
-            while (iter.next()) |id| {
-                var c = self.initial_clauses.borrow(id);
-                var expr = c.expr[0..c.capacicy];
-                self.allocator.free(expr);
+            var iter_initial = self.iterInitial();
+            while (iter_initial.next()) |cref| {
+                self.free(cref);
+            }
+
+            var iter_learned = self.iterLearned();
+            while (iter_learned.next()) |cref| {
+                self.free(cref);
             }
 
             self.initial_clauses.deinit();
@@ -136,8 +139,12 @@ pub fn ClauseDB(comptime P: type) type {
 
         pub fn free(self: *Self, cref: ClauseRef) void {
             if (cref.learned) {
+                self.borrow(cref).proof.deinit();
                 self.learned_clauses.free(cref.id);
             } else {
+                self.borrow(cref).proof.deinit();
+                var c = self.initial_clauses.borrow(cref.id);
+                self.allocator.free(c.expr[0..c.capacity]);
                 self.initial_clauses.free(cref.id);
             }
         }
@@ -171,7 +178,7 @@ pub fn ClauseDB(comptime P: type) type {
         pub fn initClause(self: *Self, is_learned: bool, expr: []const Lit, proof: P) !ClauseRef {
             var cref: ClauseRef = undefined;
             var clause: Clause(P) = .{
-                .capacicy = expr.len,
+                .capacity = expr.len,
                 .stats = undefined,
                 .expr = undefined,
                 .proof = proof,
@@ -287,7 +294,7 @@ pub fn ClauseDB(comptime P: type) type {
                 var delete = i < limit and clause.stats.Learned.lbd >= 3;
 
                 if (clause.lock == 0 and delete) {
-                    self.learned_clauses.free(cref.id);
+                    self.free(cref);
                     i += 1;
                 } else {
                     var expr = try allocator.alloc(Lit, clause.expr.len);
@@ -306,11 +313,6 @@ pub fn ClauseDB(comptime P: type) type {
 
         pub fn incrLock(self: *Self, cref: ClauseRef) void {
             self.borrow(cref).lock += 1;
-        }
-
-        pub fn deinitClause(self: *Self, cref: ClauseRef) void {
-            self.allocator.free(cref.expr);
-            self.allocator.destroy(cref);
         }
     };
 }

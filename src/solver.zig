@@ -132,7 +132,7 @@ pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
             },
             .{
                 .name = "addAxiom",
-                .type = fn (*ProofManager, []Lit) void,
+                .type = fn (*ProofManager, []Lit) ProofManager.Proof,
             },
             .{
                 .name = "initResolution",
@@ -145,6 +145,17 @@ pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
             .{
                 .name = "finalizeResolution",
                 .type = fn (*ProofManager) ProofManager.Proof,
+            },
+        });
+
+        @import("trait.zig").Trait(ProofManager.Proof, .{
+            .{
+                .name = "deinit",
+                .type = fn (ProofManager.Proof) void,
+            },
+            .{
+                .name = "clone",
+                .type = fn (ProofManager.Proof) ProofManager.Proof,
             },
         });
 
@@ -220,8 +231,8 @@ pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
 
             pub fn proof(self: @This(), db: *ClauseDB(Proof)) Proof {
                 return switch (self) {
-                    .sat => |cref| db.borrow(cref).proof,
-                    .theory => |c| c.proof,
+                    .sat => |cref| db.borrow(cref).proof.clone(),
+                    .theory => |c| c.proof.clone(),
                 };
             }
 
@@ -427,32 +438,6 @@ pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
                     continue;
                 }
 
-                //if (watchers.items[i].binary) {
-                //    std.debug.assert(self.clause_db.borrow(cref).expr.len == 2);
-                //    if (self.value(blocker) == .lfalse) {
-                //        self.propagation_queue.clearRetainingCapacity();
-                //        return cref;
-                //    }
-
-                //    var proof: ?Proof = null;
-
-                //    if (self.level == 0) {
-                //        var clause = self.clause_db.borrow(cref);
-                //        self.proof_manager.initResolution(clause.proof);
-
-                //        for (1..clause.expr.len) |idx| {
-                //            var v = clause.expr[idx].variable();
-                //            self.proof_manager.pushResolutionStep(v, self.proofOf(v).?);
-                //        }
-
-                //        proof = self.proof_manager.finalizeResolution();
-                //    }
-
-                //    try self.mkAssignation(blocker, if (self.level == 0) null else cref, proof, false);
-                //    i += 1;
-                //    continue;
-                //}
-
                 std.debug.assert(!self.clause_db.isFree(cref));
                 var clause = self.clause_db.borrow(cref);
 
@@ -495,7 +480,7 @@ pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
                 var proof: ?Proof = null;
 
                 if (self.level == 0) {
-                    self.proof_manager.initResolution(clause.proof);
+                    self.proof_manager.initResolution(clause.proof.clone());
 
                     for (1..clause.expr.len) |idx| {
                         var v = clause.expr[idx].variable();
@@ -563,7 +548,7 @@ pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
         /// return a proof of assignation of an assigned variable, if `self.levelOf(v) == 0`
         /// undefined behaviour if the variable is not assigned
         pub fn proofOf(self: Self, variable: Variable) ?Proof {
-            return self.stack.get(variable, .proof);
+            return if (self.stack.get(variable, .proof)) |proof| proof.clone() else null;
         }
 
         /// return the value of assignation of a literal, `.lundef` if not assigned
@@ -609,7 +594,10 @@ pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
             while (i < clause.expr.len) {
                 var lit = clause.expr[i];
                 if (self.value(lit) == .lfalse) {
-                    self.proof_manager.pushResolutionStep(lit.variable(), self.proofOf(lit.variable()).?);
+                    self.proof_manager.pushResolutionStep(
+                        lit.variable(),
+                        self.proofOf(lit.variable()).?,
+                    );
                     std.mem.swap(Lit, &clause.expr[i], &clause.expr[clause.expr.len - 1]);
                     clause.expr.len -= 1;
                     continue;
@@ -666,6 +654,7 @@ pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
                 return;
 
             var proof = self.proof_manager.addAxiom(expr.items);
+            self.proof_manager.initResolution(proof);
 
             var index: usize = 0;
             while (index < expr.items.len) {
@@ -758,7 +747,7 @@ pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
                             .sat => |cref| self.clause_db.decrLock(cref),
                             .theory => |tclause| {
                                 self.allocator.free(tclause.expr);
-                                // TODO release `tclause.proof`
+                                tclause.proof.deinit();
                             },
                         }
                     },
@@ -901,8 +890,9 @@ pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
                                 );
                             }
 
-                            self.is_unsat = self.proof_manager.finalizeResolution();
-                            return self.is_unsat;
+                            var out = self.proof_manager.finalizeResolution();
+                            self.is_unsat = out;
+                            return out;
                         }
 
                         self.stats.addConflict();

@@ -33,6 +33,10 @@ pub fn AssignStack(comptime Reason: type, comptime Proof: type) type {
         }
 
         pub fn deinit(self: *Self) void {
+            for (self.var_data.items(.proof)) |proof| {
+                if (proof) |p| p.deinit();
+            }
+
             self.stack.deinit(self.allocator);
             self.var_data.deinit(self.allocator);
         }

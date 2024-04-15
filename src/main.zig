@@ -3,39 +3,57 @@ pub const Solver = @import("solver.zig").Solver;
 const TClause = @import("solver.zig").TClause;
 const Lit = @import("lit.zig").Lit;
 
+var num_proof: isize = 0;
+
 pub const EmptyPM = struct {
-    pub const Proof = void;
+    pub const Proof = struct {
+        pub fn deinit(_: Proof) void {
+            num_proof -= 1;
+        }
+
+        pub fn clone(_: Proof) Proof {
+            num_proof += 1;
+            return .{};
+        }
+    };
 
     const This = @This();
 
-    pub fn addAxiom(this: *This, expr: []Lit) void {
+    pub fn addAxiom(this: *This, expr: []Lit) Proof {
         _ = this;
         _ = expr;
+
+        num_proof += 1;
+
+        return .{};
     }
 
-    pub fn initResolution(this: *This, proof: void) void {
+    pub fn initResolution(this: *This, proof: Proof) void {
+        num_proof -= 1;
         _ = proof;
         _ = this;
     }
 
-    pub fn borrow(this: *This, proof: void) void {
+    pub fn borrow(this: *This, proof: Proof) void {
         _ = proof;
         _ = this;
+
+        unreachable;
     }
 
-    pub fn release(this: *This, proof: void) void {
-        _ = proof;
-        _ = this;
-    }
-
-    pub fn pushResolutionStep(this: *This, v: @import("lit.zig").Variable, proof: void) void {
+    pub fn pushResolutionStep(this: *This, v: @import("lit.zig").Variable, proof: Proof) void {
         _ = proof;
         _ = this;
         _ = v;
+
+        num_proof -= 1;
     }
 
-    pub fn finalizeResolution(this: *This) void {
+    pub fn finalizeResolution(this: *This) Proof {
         _ = this;
+        num_proof += 1;
+
+        return .{};
     }
 };
 
@@ -52,11 +70,11 @@ pub const EmptyTSolver = struct {
         return null;
     }
 
-    pub fn reason(_: *Self, _: @import("lit.zig").Variable) TClause(void) {
+    pub fn reason(_: *Self, _: @import("lit.zig").Variable) TClause(EmptyPM.Proof) {
         unreachable;
     }
 
-    pub fn check(_: *Self) ?TClause(void) {
+    pub fn check(_: *Self) ?TClause(EmptyPM.Proof) {
         return null;
     }
 };
@@ -74,7 +92,9 @@ pub fn main() !void {
 
     const ProofManager = EmptyPM;
     var solver = try Solver(ProofManager, EmptyTSolver).init(.{}, .{}, allocator);
-    defer solver.deinit();
+    defer {
+        solver.deinit();
+    }
     solver.verbose = 1;
 
     var file_path = std.ArrayList(u8).init(allocator);
