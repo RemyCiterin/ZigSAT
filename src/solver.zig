@@ -561,6 +561,35 @@ pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
             return self.stack.get(v, .value);
         }
 
+        /// iterate over all the proofs in the solver, maybe used for GC
+        pub fn iterateProof(self: *Self, f: *const fn (Proof) void) void {
+            var iter_learned = self.clause_db.iterLearned();
+
+            while (iter_learned.next()) |cref| {
+                f(self.clause_db.borrow(cref).proof);
+            }
+
+            var iter_initial = self.clause_db.iterInitial();
+
+            while (iter_initial.next()) |cref| {
+                f(self.clause_db.borrow(cref).proof);
+            }
+
+            for (self.assign.view()) |lit| {
+                var v = lit.variable();
+
+                if (self.stack.get(v, .proof)) |proof|
+                    f(proof);
+
+                switch (self.stack.get(v, .reason)) {
+                    .Eager => |reason| f(reason.proof),
+                    else => {},
+                }
+            }
+
+            if (self.is_unsat) |proof| f(proof);
+        }
+
         pub fn print(self: *Self) void {
             self.clause_db.printDB();
 
@@ -1065,7 +1094,7 @@ pub fn Solver(comptime ProofManager: type, comptime TSolver: type) type {
         }
 
         /// create a new variable and initialize all it's states
-        pub fn addVariable(self: *Self) SolverError!u31 {
+        pub fn addVariable(self: *Self) SolverError!Variable {
             var new_var_usize = try self.stack.addVariable();
 
             var new_var: Variable = @truncate(new_var_usize);

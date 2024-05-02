@@ -47,7 +47,7 @@ pub fn deinit(self: *Self) void {
 
 pub fn addVariable(self: *Self) !void {
     var v: Variable = @truncate(self.activity.items.len);
-    var a: f64 = self.rnd.random().float(f64) * 0.001;
+    var a: f64 = self.rnd.random().float(f64) * 0.01;
     var p: bool = self.rnd.random().float(f32) > 0.5;
     try self.polarity.append(self.allocator, p);
     try self.activity.append(self.allocator, a);

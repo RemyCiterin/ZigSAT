@@ -8,7 +8,7 @@ profile: build
 	rm -rf perf.data.old
 
 profile_minisat:
-	time perf record --call-graph=dwarf -- ./test-generator/minisat/core/minisat $(TEST)
+	time perf record --call-graph=dwarf -- ./zig-out/bin/ZigSat $(TEST)
 	perf report
 	rm -rf perf.data
 	rm -rf perf.data.old

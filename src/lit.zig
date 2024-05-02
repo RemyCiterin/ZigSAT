@@ -78,7 +78,7 @@ pub fn variableToUsize(v: Variable) usize {
     return @intCast(v);
 }
 
-pub const Lit = packed struct(u32) {
+pub const Lit = packed struct {
     val: Variable,
     tag: bool,
 
@@ -89,10 +89,10 @@ pub const Lit = packed struct(u32) {
     }
 
     pub fn not(self: Self) Self {
-        return Self{ .val = self.val, .tag = !self.tag };
+        return Self.init(self.variable(), !self.sign());
     }
 
-    pub fn variable(self: Self) u31 {
+    pub fn variable(self: Self) Variable {
         return self.val;
     }
 
@@ -102,14 +102,6 @@ pub const Lit = packed struct(u32) {
 
     pub fn equals(self: Self, other: Self) bool {
         return self.variable() == other.variable() and self.sign() == other.sign();
-    }
-
-    pub fn toInt(self: Self) u32 {
-        return @bitCast(self);
-    }
-
-    pub fn fromInt(x: u32) Self {
-        return @bitCast(x);
     }
 };
 

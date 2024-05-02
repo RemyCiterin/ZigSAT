@@ -4,6 +4,7 @@
 const std = @import("std");
 const Lit = @import("lit.zig").Lit;
 const lbool = @import("lit.zig").lbool;
+const Variable = @import("lit.zig").Variable;
 
 /// statistics of a learned clause
 pub const LearnedClauseStats = struct {
@@ -342,9 +343,9 @@ test "random clause manager test" {
                 var lit: Lit = undefined;
 
                 if (rnd.random().int(u32) % 2 == 0) {
-                    lit = Lit{ .pos = rnd.random().int(u31) };
+                    lit = Lit{ .pos = rnd.random().int(Variable) };
                 } else {
-                    lit = Lit{ .neg = rnd.random().int(u31) };
+                    lit = Lit{ .neg = rnd.random().int(Variable) };
                 }
 
                 try expr.append(lit);

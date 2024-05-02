@@ -117,7 +117,8 @@ pub fn AssignStack(comptime Reason: type, comptime Proof: type) type {
                 .proof = proof,
             });
 
-            if (self.level > 0) try self.stack.append(self.allocator, lit);
+            //if (self.level > 0)
+            try self.stack.append(self.allocator, lit);
         }
 
         /// force an assignation at level zero
